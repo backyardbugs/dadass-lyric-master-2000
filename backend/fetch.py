@@ -44,8 +44,10 @@ def get_spotify_tracks(playlist_id: str) -> list[dict]:
     tracks = []
     offset = 0
     limit = 50
+    # Market required for client credentials; otherwise Spotify may return 403 for "public" playlists
+    market = os.getenv("SPOTIFY_MARKET", "US")
     while True:
-        page = sp.playlist_tracks(playlist_id, offset=offset, limit=limit)
+        page = sp.playlist_tracks(playlist_id, offset=offset, limit=limit, market=market)
         items = page.get("items") or []
         if not items:
             break
