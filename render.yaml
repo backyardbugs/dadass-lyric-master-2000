@@ -1,0 +1,8 @@
+# Render.com blueprint. Deploy from repo root.
+# In Render dashboard set: SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET, GENIUS_ACCESS_TOKEN, CORS_ORIGINS (e.g. https://your-app.vercel.app)
+services:
+  - type: web
+    name: emo-almanac-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
