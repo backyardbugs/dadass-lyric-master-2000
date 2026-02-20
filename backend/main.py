@@ -7,9 +7,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
+from spotipy.oauth2 import SpotifyOAuth
 
 # Load .env from project root
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
@@ -59,14 +61,72 @@ class FetchResponse(BaseModel):
     playlist_id: str | None = None
 
 
+def _get_spotify_oauth():
+    redirect_uri = os.getenv("SPOTIFY_REDIRECT_URI")
+    if not redirect_uri:
+        raise RuntimeError("Set SPOTIFY_REDIRECT_URI in env (e.g. https://your-app.onrender.com/api/auth/spotify/callback)")
+    return SpotifyOAuth(
+        client_id=os.getenv("SPOTIPY_CLIENT_ID", ""),
+        client_secret=os.getenv("SPOTIPY_CLIENT_SECRET", ""),
+        redirect_uri=redirect_uri,
+        scope="playlist-read-private playlist-read-collaborative",
+    )
+
+
+@app.get("/api/auth/spotify")
+def api_auth_spotify():
+    """Redirect user to Spotify to authorize playlist access."""
+    oauth = _get_spotify_oauth()
+    auth_url = oauth.get_authorize_url(state="emo_almanac")
+    return RedirectResponse(url=auth_url)
+
+
+@app.get("/api/auth/spotify/callback")
+def api_auth_spotify_callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None):
+    """Exchange code for token, set cookie, redirect to frontend."""
+    frontend_url = os.getenv("FRONTEND_URL", "https://frontend-woad-xi-34.vercel.app")
+    if error or not code:
+        return RedirectResponse(url=frontend_url + "?spotify=auth_denied")
+    try:
+        oauth = _get_spotify_oauth()
+        token_info = oauth.get_access_token(code)
+        if isinstance(token_info, dict):
+            access_token = token_info.get("access_token")
+        else:
+            access_token = getattr(token_info, "access_token", None) or str(token_info)
+        if not access_token:
+            return RedirectResponse(url=frontend_url + "?spotify=no_token")
+    except Exception:
+        return RedirectResponse(url=frontend_url + "?spotify=exchange_failed")
+    response = RedirectResponse(url=frontend_url + "?spotify=ok")
+    response.set_cookie(
+        key="spotify_token",
+        value=access_token,
+        max_age=3600,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        path="/",
+    )
+    return response
+
+
+@app.get("/api/auth/status")
+def api_auth_status(request: Request):
+    """Return whether user has logged in with Spotify (for playlist access)."""
+    token = request.cookies.get("spotify_token")
+    return {"spotify": bool(token)}
+
+
 @app.post("/api/fetch", response_model=FetchResponse)
-def api_fetch(body: FetchRequest):
-    """Fetch playlist from Spotify and lyrics from Genius; clean and store in DB."""
+def api_fetch(body: FetchRequest, request: Request):
+    """Fetch playlist from Spotify and lyrics from Genius; clean and store in DB. Uses Spotify OAuth token if present."""
     playlist_id = extract_playlist_id(body.playlist_url)
     if not playlist_id:
         raise HTTPException(status_code=400, detail="Invalid playlist URL or ID")
+    spotify_token = request.cookies.get("spotify_token")
     try:
-        raw_tracks = fetch_playlist(body.playlist_url)
+        raw_tracks = fetch_playlist(body.playlist_url, spotify_access_token=spotify_token)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:
@@ -86,9 +146,14 @@ def api_fetch(body: FetchRequest):
         if "404" in msg or "not found" in msg_lower:
             raise HTTPException(status_code=404, detail="Playlist not found. Check the URL and that the playlist is public.")
         if "403" in msg or "forbidden" in msg_lower:
+            if not spotify_token:
+                raise HTTPException(
+                    status_code=401,
+                    detail="Log in with Spotify first (Spotify requires this to read playlists). Click “Log in with Spotify” above.",
+                )
             raise HTTPException(
                 status_code=403,
-                detail="Playlist is private. In Spotify (app or web), right‑click the playlist → Make Public, then try again.",
+                detail="Playlist is private or access denied. In Spotify, right‑click the playlist → Make Public, then try again.",
             )
         # Surface the real error (first line, no secrets) so user can debug
         detail = msg.split("\n")[0][:200] if msg else "Fetch failed."

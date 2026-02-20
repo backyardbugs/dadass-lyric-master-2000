@@ -17,6 +17,18 @@ from spotipy.oauth2 import SpotifyClientCredentials
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 
+class _TokenAuth:
+    """Auth manager that returns a pre-obtained access token (for OAuth user token)."""
+
+    def __init__(self, access_token: str):
+        self._token = access_token
+
+    def get_access_token(self, as_dict: bool = False):
+        if as_dict:
+            return {"access_token": self._token, "token_type": "Bearer", "expires_in": -1}
+        return self._token
+
+
 def extract_playlist_id(url: str) -> str | None:
     """Extract Spotify playlist ID from URL or raw ID."""
     if not url or not url.strip():
@@ -33,19 +45,23 @@ def extract_playlist_id(url: str) -> str | None:
     return None
 
 
-def get_spotify_tracks(playlist_id: str) -> list[dict]:
-    """Fetch all tracks from a public Spotify playlist. Returns list of {artist, title, spotify_id}."""
-    client_id = os.getenv("SPOTIPY_CLIENT_ID")
-    client_secret = os.getenv("SPOTIPY_CLIENT_SECRET")
-    if not client_id or not client_secret:
-        raise RuntimeError("Set SPOTIPY_CLIENT_ID and SPOTIPY_CLIENT_SECRET in .env")
-    auth = SpotifyClientCredentials(client_id=client_id, client_secret=client_secret)
-    sp = Spotify(auth_manager=auth)
+def get_spotify_tracks(playlist_id: str, access_token: str | None = None) -> list[dict]:
+    """Fetch all tracks from a Spotify playlist. Use access_token (OAuth) for any playlist; else client credentials (public only, may 403)."""
+    if access_token:
+        auth = _TokenAuth(access_token)
+        sp = Spotify(auth_manager=auth)
+        market = None
+    else:
+        client_id = os.getenv("SPOTIPY_CLIENT_ID")
+        client_secret = os.getenv("SPOTIPY_CLIENT_SECRET")
+        if not client_id or not client_secret:
+            raise RuntimeError("Set SPOTIPY_CLIENT_ID and SPOTIPY_CLIENT_SECRET in .env")
+        auth = SpotifyClientCredentials(client_id=client_id, client_secret=client_secret)
+        sp = Spotify(auth_manager=auth)
+        market = os.getenv("SPOTIFY_MARKET", "US")
     tracks = []
     offset = 0
     limit = 50
-    # Market required for client credentials; otherwise Spotify may return 403 for "public" playlists
-    market = os.getenv("SPOTIFY_MARKET", "US")
     while True:
         page = sp.playlist_tracks(playlist_id, offset=offset, limit=limit, market=market)
         items = page.get("items") or []
@@ -97,15 +113,16 @@ def fetch_lyrics_for_tracks(tracks: list[dict], genius_token: str | None = None)
     return results
 
 
-def fetch_playlist(playlist_url: str) -> list[dict]:
+def fetch_playlist(playlist_url: str, spotify_access_token: str | None = None) -> list[dict]:
     """
     Full fetch: parse URL -> Spotify tracks -> Genius lyrics.
+    Use spotify_access_token (from OAuth) to read any playlist; without it, client credentials may 403.
     Returns list of {artist, title, spotify_id, lyrics}.
     """
     playlist_id = extract_playlist_id(playlist_url)
     if not playlist_id:
         raise ValueError("Invalid playlist URL or ID")
-    tracks = get_spotify_tracks(playlist_id)
+    tracks = get_spotify_tracks(playlist_id, access_token=spotify_access_token)
     if not tracks:
         raise ValueError("Playlist is empty or could not be read")
     return fetch_lyrics_for_tracks(tracks)

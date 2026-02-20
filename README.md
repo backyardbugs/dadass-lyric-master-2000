@@ -64,6 +64,8 @@ GENIUS_ACCESS_TOKEN=...
 
 **Frontend** (optional): in `frontend/.env.local` set `NEXT_PUBLIC_API_URL=http://localhost:8000` if the API is on a different host.
 
+**Spotify playlist access:** Spotify’s API only allows reading playlist tracks with a **user** token (scope `playlist-read-private`), not with app-only client credentials. So in the app you must click **“Log in with Spotify”** once; after that, fetch will work for your playlists (including public ones). On Render, set `SPOTIFY_REDIRECT_URI` and `FRONTEND_URL` (see Deployment).
+
 ## Project structure
 
 ```
@@ -99,7 +101,7 @@ GENIUS_ACCESS_TOKEN=...
 
 1. Push the repo to GitHub and connect it to [Render](https://render.com).
 2. New → Web Service → connect repo, use **Docker** runtime (Render will use the root `Dockerfile`).
-3. Add environment variables in the dashboard: `SPOTIPY_CLIENT_ID`, `SPOTIPY_CLIENT_SECRET`, `GENIUS_ACCESS_TOKEN`, and `CORS_ORIGINS` = your frontend URL (e.g. `https://your-app.vercel.app`).
+3. Add environment variables: `SPOTIPY_CLIENT_ID`, `SPOTIPY_CLIENT_SECRET`, `GENIUS_ACCESS_TOKEN`, `CORS_ORIGINS` (your frontend URL), `SPOTIFY_REDIRECT_URI` (e.g. `https://dadass-lyric-master-2000.onrender.com/api/auth/spotify/callback`), and `FRONTEND_URL` (your frontend URL). In the [Spotify app](https://developer.spotify.com/dashboard) → Edit Settings → Redirect URIs, add the same `SPOTIFY_REDIRECT_URI` value.
 4. Deploy. Note: free tier uses ephemeral disk; SQLite data is lost on redeploy.
 
 **Frontend (Vercel)**

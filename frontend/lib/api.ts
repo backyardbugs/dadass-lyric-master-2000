@@ -5,6 +5,7 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   try {
     res = await fetch(`${API_BASE}${path}`, {
       ...options,
+      credentials: "include",
       headers: { "Content-Type": "application/json", ...options?.headers },
     });
   } catch (e) {
@@ -27,6 +28,12 @@ export type Status = {
   last_analyzed: string | null;
   playlist_name: string | null;
 };
+
+export const getSpotifyLoginUrl = () => `${API_BASE}/api/auth/spotify`;
+
+export async function getAuthStatus(): Promise<{ spotify: boolean }> {
+  return fetchApi<{ spotify: boolean }>("/api/auth/status");
+}
 
 export async function getStatus(): Promise<Status> {
   return fetchApi<Status>("/api/status");

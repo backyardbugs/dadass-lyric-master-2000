@@ -6,11 +6,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { getStatus, fetchPlaylist, runAnalyze } from "@/lib/api";
+import { getStatus, fetchPlaylist, runAnalyze, getAuthStatus, getSpotifyLoginUrl } from "@/lib/api";
 
 export default function DashboardPage() {
   const [playlistUrl, setPlaylistUrl] = useState("");
   const [status, setStatus] = useState<Awaited<ReturnType<typeof getStatus>> | null>(null);
+  const [spotifyLoggedIn, setSpotifyLoggedIn] = useState(false);
   const [loading, setLoading] = useState<"fetch" | "analyze" | null>(null);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
@@ -23,8 +24,23 @@ export default function DashboardPage() {
     }
   };
 
+  const loadAuthStatus = async () => {
+    try {
+      const a = await getAuthStatus();
+      setSpotifyLoggedIn(a.spotify);
+    } catch {
+      setSpotifyLoggedIn(false);
+    }
+  };
+
   useEffect(() => {
     loadStatus();
+    loadAuthStatus();
+    const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+    if (params?.get("spotify") === "ok") {
+      window.history.replaceState({}, "", window.location.pathname);
+      loadAuthStatus();
+    }
   }, []);
 
   const onFetch = async () => {
@@ -39,7 +55,9 @@ export default function DashboardPage() {
       setMessage({ type: "success", text: "Lyrics fetched successfully." });
       await loadStatus();
     } catch (e) {
-      setMessage({ type: "error", text: e instanceof Error ? e.message : "Fetch failed." });
+      const text = e instanceof Error ? e.message : "Fetch failed.";
+      setMessage({ type: "error", text });
+      if (text.includes("Log in with Spotify")) loadAuthStatus();
     } finally {
       setLoading(null);
     }
@@ -70,9 +88,23 @@ export default function DashboardPage() {
         <Card className="bg-zinc-900 border-zinc-800">
           <CardHeader>
             <CardTitle>Data pipeline</CardTitle>
-            <CardDescription>Paste a Spotify playlist URL, fetch lyrics, then run analysis.</CardDescription>
+            <CardDescription>Paste a Spotify playlist URL, fetch lyrics, then run analysis. Spotify requires you to log in once to read playlists.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="flex flex-wrap gap-3 items-center">
+              {spotifyLoggedIn ? (
+                <span className="text-emerald-400 text-sm">Logged in with Spotify</span>
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="border-zinc-600"
+                  onClick={() => { window.location.href = getSpotifyLoginUrl(); }}
+                >
+                  Log in with Spotify
+                </Button>
+              )}
+            </div>
             <div className="space-y-2">
               <Label htmlFor="playlist-url">Spotify playlist URL</Label>
               <Input
