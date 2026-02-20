@@ -22,13 +22,21 @@ from backend import db
 
 app = FastAPI(title="The Emo Almanac API", version="0.1.0")
 
-_cors_origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
 import os
+import re
+_cors_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://frontend-woad-xi-34.vercel.app",
+]
 if os.getenv("CORS_ORIGINS"):
     _cors_origins.extend(o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip())
+# Allow any Vercel deployment (same project)
+_cors_origin_regex = re.compile(r"^https://(frontend-[a-z0-9-]+-backyardbugs-projects\.vercel\.app|.*\.vercel\.app)$")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
+    allow_origin_regex=_cors_origin_regex.pattern,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
