@@ -75,12 +75,21 @@ def api_fetch(body: FetchRequest):
             raise HTTPException(status_code=500, detail="Check your API keys in .env (Genius and Spotify).")
         raise HTTPException(status_code=500, detail=msg)
     except Exception as e:
-        msg = str(e).lower()
-        if "rate" in msg or "429" in msg:
-            raise HTTPException(status_code=429, detail="Rate limit hit. Wait a moment and try again.")
-        if "timeout" in msg:
+        msg = str(e).strip()
+        msg_lower = msg.lower()
+        if "rate" in msg_lower or "429" in msg_lower:
+            raise HTTPException(status_code=429, detail="Rate limit hit. Wait a minute and try again.")
+        if "timeout" in msg_lower or "timed out" in msg_lower:
             raise HTTPException(status_code=504, detail="Request timed out. Try again.")
-        raise HTTPException(status_code=500, detail="Fetch failed. Invalid playlist or no lyrics found for many tracks.")
+        if "401" in msg or "unauthorized" in msg_lower or "invalid" in msg_lower and "token" in msg_lower:
+            raise HTTPException(status_code=500, detail="API key problem. Check your Spotify and Genius keys in Render dashboard.")
+        if "404" in msg or "not found" in msg_lower:
+            raise HTTPException(status_code=404, detail="Playlist not found. Check the URL and that the playlist is public.")
+        if "403" in msg or "forbidden" in msg_lower:
+            raise HTTPException(status_code=403, detail="Access denied. The playlist may be private.")
+        # Surface the real error (first line, no secrets) so user can debug
+        detail = msg.split("\n")[0][:200] if msg else "Fetch failed."
+        raise HTTPException(status_code=500, detail=detail)
     if not raw_tracks:
         raise HTTPException(status_code=400, detail="Playlist is empty or could not be read.")
     # Clean lyrics and add cleaned_lyrics

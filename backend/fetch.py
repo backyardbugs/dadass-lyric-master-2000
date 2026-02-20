@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -74,7 +75,9 @@ def fetch_lyrics_for_tracks(tracks: list[dict], genius_token: str | None = None)
     genius.remove_section_headers = True
     genius.skip_non_songs = True
     results = []
-    for t in tracks:
+    for i, t in enumerate(tracks):
+        if i > 0:
+            time.sleep(0.4)
         artist, title = t["artist"], t["title"]
         lyrics = None
         try:
