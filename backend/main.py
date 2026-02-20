@@ -86,7 +86,10 @@ def api_fetch(body: FetchRequest):
         if "404" in msg or "not found" in msg_lower:
             raise HTTPException(status_code=404, detail="Playlist not found. Check the URL and that the playlist is public.")
         if "403" in msg or "forbidden" in msg_lower:
-            raise HTTPException(status_code=403, detail="Access denied. The playlist may be private.")
+            raise HTTPException(
+                status_code=403,
+                detail="Playlist is private. In Spotify (app or web), right‑click the playlist → Make Public, then try again.",
+            )
         # Surface the real error (first line, no secrets) so user can debug
         detail = msg.split("\n")[0][:200] if msg else "Fetch failed."
         raise HTTPException(status_code=500, detail=detail)
