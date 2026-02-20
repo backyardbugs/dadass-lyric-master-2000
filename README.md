@@ -4,6 +4,19 @@ Lyric analysis and generative tools for Emo / Pop-Punk: analyze Spotify playlist
 
 **Frontend (deployed):** https://frontend-woad-xi-34.vercel.app — To use it with data, deploy the backend (e.g. Render) and set `NEXT_PUBLIC_API_URL` in Vercel to the backend URL, and set `CORS_ORIGINS` on the backend to the frontend URL.
 
+## Push to GitHub
+
+The project is already a git repo with one commit. To push it to GitHub:
+
+1. **Create a new repository** on [GitHub](https://github.com/new): name it e.g. `emo-almanac` or `dadass-lyric-master-2000`, leave “Add a README” unchecked.
+2. **Add the remote and push** (replace `YOUR_USERNAME` and `YOUR_REPO` with your GitHub username and repo name):
+
+   ```bash
+   cd "/Users/tyler/Desktop/Dadass Lyric Master 2000"
+   git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPO.git
+   git push -u origin main
+   ```
+
 ## Quick start
 
 **1. Backend (Python)**
