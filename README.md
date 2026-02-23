@@ -101,14 +101,16 @@ GENIUS_ACCESS_TOKEN=...
 
 1. Push the repo to GitHub and connect it to [Render](https://render.com).
 2. New → Web Service → connect repo, use **Docker** runtime (Render will use the root `Dockerfile`).
-3. Add environment variables: `SPOTIPY_CLIENT_ID`, `SPOTIPY_CLIENT_SECRET`, `GENIUS_ACCESS_TOKEN`, `CORS_ORIGINS` (your frontend URL), `SPOTIFY_REDIRECT_URI` (e.g. `https://dadass-lyric-master-2000.onrender.com/api/auth/spotify/callback`), and `FRONTEND_URL` (your frontend URL). In the [Spotify app](https://developer.spotify.com/dashboard) → Edit Settings → Redirect URIs, add the same `SPOTIFY_REDIRECT_URI` value.
+3. Add environment variables: `SPOTIPY_CLIENT_ID`, `SPOTIPY_CLIENT_SECRET`, `GENIUS_ACCESS_TOKEN`, `CORS_ORIGINS` (your frontend URL), `SPOTIFY_REDIRECT_URI` (use the **frontend** callback URL, e.g. `https://frontend-woad-xi-34.vercel.app/api/auth/spotify/callback`, so Spotify sends users to the frontend and the token is delivered reliably), and `FRONTEND_URL` (your frontend URL). In the [Spotify app](https://developer.spotify.com/dashboard) → Edit Settings → Redirect URIs, add that same `SPOTIFY_REDIRECT_URI` value.
 4. Deploy. Note: free tier uses ephemeral disk; SQLite data is lost on redeploy.
 
 **Frontend (Vercel)**
 
 1. Push the repo and import the project in [Vercel](https://vercel.com); set **Root Directory** to `frontend`.
-2. Add environment variable: `NEXT_PUBLIC_API_URL` = your backend URL (e.g. `https://emo-almanac-api.onrender.com`).
-3. Deploy. Then set that same URL as `CORS_ORIGINS` on the backend so the API allows requests from the frontend.
+2. Add environment variables:
+   - `NEXT_PUBLIC_API_URL` = your backend URL (e.g. `https://dadass-lyric-master-2000.onrender.com`).
+   - For Spotify login: `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET` (same values as backend), and `SPOTIFY_REDIRECT_URI` = `https://YOUR_VERCEL_APP.vercel.app/api/auth/spotify/callback` (your frontend callback URL). Add that exact URL to your [Spotify app](https://developer.spotify.com/dashboard) Redirect URIs too.
+3. Deploy. Set the frontend URL as `CORS_ORIGINS` on the backend.
 
 **One-command deploy (if you have CLI logged in)**
 

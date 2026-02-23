@@ -4,7 +4,10 @@ Run: uvicorn backend.main:app --reload
 """
 from __future__ import annotations
 
+import secrets
+import time
 from pathlib import Path
+from urllib.parse import quote
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
@@ -16,8 +19,10 @@ from spotipy.oauth2 import SpotifyOAuth
 # Load .env from project root
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
+from spotipy import Spotify
+
 from backend.cleaner import clean_lyrics
-from backend.fetch import extract_playlist_id, fetch_playlist
+from backend.fetch import _TokenAuth, extract_playlist_id, fetch_playlist
 from backend.analyze import tokenize_lyrics, top_n_words, build_word_contexts
 from backend.nlp import sentiment_scores, top_n_by_pos, run_lda
 from backend import db
@@ -44,6 +49,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# One-time codes for token exchange (works when cross-site cookies are blocked)
+_spotify_code_store: dict[str, tuple[str, float]] = {}
+_CODE_TTL_SEC = 300
+
+
+def _get_spotify_token_from_request(request: Request) -> str | None:
+    """Token from cookie (same-site or when third-party cookies allowed) or Authorization header."""
+    token = request.cookies.get("spotify_token")
+    if token:
+        return token
+    auth = request.headers.get("Authorization")
+    if auth and auth.startswith("Bearer "):
+        return auth[7:].strip() or None
+    return None
+
 
 @app.on_event("startup")
 def startup():
@@ -64,7 +84,9 @@ class FetchResponse(BaseModel):
 def _get_spotify_oauth():
     redirect_uri = os.getenv("SPOTIFY_REDIRECT_URI")
     if not redirect_uri:
-        raise RuntimeError("Set SPOTIFY_REDIRECT_URI in env (e.g. https://your-app.onrender.com/api/auth/spotify/callback)")
+        raise RuntimeError(
+            "Set SPOTIFY_REDIRECT_URI in env. Use the frontend callback URL so Spotify sends users to the frontend, e.g. https://your-frontend.vercel.app/api/auth/spotify/callback"
+        )
     return SpotifyOAuth(
         client_id=os.getenv("SPOTIPY_CLIENT_ID", ""),
         client_secret=os.getenv("SPOTIPY_CLIENT_SECRET", ""),
@@ -98,24 +120,60 @@ def api_auth_spotify_callback(request: Request, code: str | None = None, state: 
             return RedirectResponse(url=frontend_url + "?spotify=no_token")
     except Exception:
         return RedirectResponse(url=frontend_url + "?spotify=exchange_failed")
-    response = RedirectResponse(url=frontend_url + "?spotify=ok")
+    # Pass token in query so frontend gets it (fragments are often stripped on redirect).
+    # Do not log redirect_url. Frontend clears the URL immediately after reading.
+    redirect_url = frontend_url + "?spotify=ok&token=" + quote(access_token, safe="")
+    response = RedirectResponse(url=redirect_url)
     response.set_cookie(
         key="spotify_token",
         value=access_token,
         max_age=3600,
         httponly=True,
         secure=True,
-        samesite="lax",
+        samesite="none",
         path="/",
     )
     return response
 
 
+def _clean_expired_codes():
+    now = time.time()
+    expired = [k for k, (_, exp) in _spotify_code_store.items() if exp <= now]
+    for k in expired:
+        _spotify_code_store.pop(k, None)
+
+
+@app.get("/api/auth/exchange")
+def api_auth_exchange(code: str | None = None):
+    """Exchange one-time code for access token (for when cross-site cookies are blocked)."""
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing code")
+    _clean_expired_codes()
+    now = time.time()
+    if code in _spotify_code_store:
+        token, expiry = _spotify_code_store.pop(code)
+        if expiry > now:
+            return {"access_token": token}
+    raise HTTPException(status_code=400, detail="Invalid or expired code")
+
+
+def _spotify_token_valid(token: str) -> bool:
+    """Return True if the token is valid (not expired)."""
+    if not token:
+        return False
+    try:
+        sp = Spotify(auth_manager=_TokenAuth(token))
+        sp.current_user()
+        return True
+    except Exception:
+        return False
+
+
 @app.get("/api/auth/status")
 def api_auth_status(request: Request):
-    """Return whether user has logged in with Spotify (for playlist access)."""
-    token = request.cookies.get("spotify_token")
-    return {"spotify": bool(token)}
+    """Return whether user has a valid Spotify token (for playlist access)."""
+    token = _get_spotify_token_from_request(request)
+    return {"spotify": _spotify_token_valid(token)}
 
 
 @app.post("/api/fetch", response_model=FetchResponse)
@@ -124,7 +182,7 @@ def api_fetch(body: FetchRequest, request: Request):
     playlist_id = extract_playlist_id(body.playlist_url)
     if not playlist_id:
         raise HTTPException(status_code=400, detail="Invalid playlist URL or ID")
-    spotify_token = request.cookies.get("spotify_token")
+    spotify_token = _get_spotify_token_from_request(request)
     try:
         raw_tracks = fetch_playlist(body.playlist_url, spotify_access_token=spotify_token)
     except ValueError as e:

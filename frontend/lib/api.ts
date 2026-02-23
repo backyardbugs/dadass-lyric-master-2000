@@ -1,12 +1,53 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://dadass-lyric-master-2000.onrender.com";
 
+let spotifyToken: string | null = null;
+if (typeof window !== "undefined") {
+  try {
+    const stored = sessionStorage.getItem("spotify_token");
+    if (stored) spotifyToken = stored;
+  } catch {
+    /* ignore */
+  }
+}
+
+export function setSpotifyToken(token: string | null) {
+  spotifyToken = token;
+  try {
+    if (typeof window !== "undefined") {
+      if (token) sessionStorage.setItem("spotify_token", token);
+      else sessionStorage.removeItem("spotify_token");
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Sync in-memory token from sessionStorage (e.g. after reload or when chunk loads late). */
+function syncTokenFromStorage() {
+  if (typeof window === "undefined") return;
+  if (spotifyToken) return;
+  try {
+    const s = sessionStorage.getItem("spotify_token");
+    if (s) spotifyToken = s;
+  } catch {
+    /* ignore */
+  }
+}
+
+function authHeaders(): Record<string, string> {
+  syncTokenFromStorage();
+  const h: Record<string, string> = { "Content-Type": "application/json" };
+  if (spotifyToken) h["Authorization"] = `Bearer ${spotifyToken}`;
+  return h;
+}
+
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`${API_BASE}${path}`, {
       ...options,
       credentials: "include",
-      headers: { "Content-Type": "application/json", ...options?.headers },
+      headers: { ...authHeaders(), ...options?.headers },
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Network error";
@@ -30,6 +71,17 @@ export type Status = {
 };
 
 export const getSpotifyLoginUrl = () => `${API_BASE}/api/auth/spotify`;
+
+export async function exchangeSpotifyCode(code: string): Promise<{ access_token: string }> {
+  const res = await fetch(`${API_BASE}/api/auth/exchange?code=${encodeURIComponent(code)}`, {
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(typeof err.detail === "string" ? err.detail : JSON.stringify(err));
+  }
+  return res.json();
+}
 
 export async function getAuthStatus(): Promise<{ spotify: boolean }> {
   return fetchApi<{ spotify: boolean }>("/api/auth/status");
@@ -55,7 +107,7 @@ export async function runAnalyze(): Promise<{ ok: boolean; message: string; top_
     const res = await fetch(`${API_BASE}/api/analyze`, {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders(),
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
