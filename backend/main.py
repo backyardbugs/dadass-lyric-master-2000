@@ -195,35 +195,42 @@ def api_analyze():
     if not tokens:
         text_key = "raw_lyrics"
         tokens = tokenize_lyrics(tracks, text_key=text_key)
+    if not tokens:
+        raise HTTPException(status_code=400, detail="No lyrics to analyze. Fetch a playlist with lyrics first.")
     top50 = top_n_words(tokens, n=50)
     word_contexts = build_word_contexts(tracks, text_key=text_key)
     if not word_contexts:
         word_contexts = build_word_contexts(tracks, text_key="raw_lyrics")
 
-    # Sentiment per track
-    for t in tracks:
-        raw = t.get("cleaned_lyrics") or t.get("raw_lyrics") or ""
-        sad, ang, nos = sentiment_scores(raw)
-        db.update_track_sentiment(t["id"], sad, ang, nos)
-
-    # POS-based top words
-    by_pos = top_n_by_pos(tracks, text_key=text_key, n=30)
-
-    # Topic modeling
-    topic_labels, per_track_weights, doc_track_ids = run_lda(tracks, text_key=text_key, n_topics=6)
-
     run_id = db.insert_analysis_run(playlist_pk)
     db.delete_word_frequencies_for_run(run_id)
     db.insert_word_frequencies(run_id, top50, pos=None)
-    for pos_name, pairs in by_pos.items():
-        db.insert_word_frequencies(run_id, pairs, pos=pos_name)
     db.insert_word_contexts(run_id, word_contexts)
 
-    if topic_labels and per_track_weights and doc_track_ids:
-        topic_ids = db.insert_topics(run_id, topic_labels)
-        for topic_idx, topic_id in enumerate(topic_ids):
-            weights = [(doc_track_ids[i], per_track_weights[i][topic_idx][1]) for i in range(len(per_track_weights))]
-            db.insert_track_topics(run_id, topic_id, weights)
+    try:
+        for t in tracks:
+            raw = t.get("cleaned_lyrics") or t.get("raw_lyrics") or ""
+            sad, ang, nos = sentiment_scores(raw)
+            db.update_track_sentiment(t["id"], sad, ang, nos)
+    except Exception:
+        pass
+
+    try:
+        by_pos = top_n_by_pos(tracks, text_key=text_key, n=30)
+        for pos_name, pairs in by_pos.items():
+            db.insert_word_frequencies(run_id, pairs, pos=pos_name)
+    except Exception:
+        pass
+
+    try:
+        topic_labels, per_track_weights, doc_track_ids = run_lda(tracks, text_key=text_key, n_topics=6)
+        if topic_labels and per_track_weights and doc_track_ids:
+            topic_ids = db.insert_topics(run_id, topic_labels)
+            for topic_idx, topic_id in enumerate(topic_ids):
+                weights = [(doc_track_ids[i], per_track_weights[i][topic_idx][1]) for i in range(len(per_track_weights))]
+                db.insert_track_topics(run_id, topic_id, weights)
+    except Exception:
+        pass
 
     return AnalyzeResponse(
         ok=True,

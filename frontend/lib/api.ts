@@ -46,8 +46,35 @@ export async function fetchPlaylist(playlistUrl: string): Promise<{ ok: boolean;
   });
 }
 
+const ANALYZE_TIMEOUT_MS = 120000;
+
 export async function runAnalyze(): Promise<{ ok: boolean; message: string; top_words: { word: string; count: number }[]; run_id: number }> {
-  return fetchApi("/api/analyze", { method: "POST" });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), ANALYZE_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${API_BASE}/api/analyze`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(typeof err.detail === "string" ? err.detail : JSON.stringify(err));
+    }
+    return res.json();
+  } catch (e) {
+    clearTimeout(timeoutId);
+    if (e instanceof Error && e.name === "AbortError") {
+      throw new Error("Analysis timed out. Try a smaller playlist (e.g. under 30 tracks) or try again.");
+    }
+    const msg = e instanceof Error ? e.message : "Network error";
+    if (/failed to fetch|load failed|network error/i.test(msg)) {
+      throw new Error("Analysis request failed—server may have timed out. Try a smaller playlist or try again in a minute.");
+    }
+    throw e;
+  }
 }
 
 export async function getTopWords(pos?: string, limit = 100): Promise<{ top_words: { word: string; count: number }[]; run_id: number | null }> {
