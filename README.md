@@ -121,6 +121,7 @@ GENIUS_ACCESS_TOKEN=...
 - **Rate limit** — Genius or Spotify limit; wait a minute and try again.
 - **Check your API keys** — Ensure `.env` has correct `SPOTIPY_*` and `GENIUS_ACCESS_TOKEN`.
 - **No playlist data. Run fetch first.** — Click “Fetch lyrics” before “Analyze”.
+- **Spotify “something went wrong” when saving Redirect URI** — Spotify allows multiple redirect URIs, so having two is fine. If the dashboard won’t save: (1) Use the exact URL with `https://`, no trailing slash (e.g. `https://dadass-lyric-master-2000.onrender.com/api/auth/spotify/callback`). (2) Try removing all redirect URIs, click Save, then add the one you need and Save again. (3) Try another browser or an incognito window in case of cache/session issues.
 
 ## CLI (optional)
 

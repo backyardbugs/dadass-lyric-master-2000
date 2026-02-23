@@ -92,18 +92,17 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex flex-wrap gap-3 items-center">
-              {spotifyLoggedIn ? (
+              {spotifyLoggedIn && (
                 <span className="text-emerald-400 text-sm">Logged in with Spotify</span>
-              ) : (
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="border-zinc-600"
-                  onClick={() => { window.location.href = getSpotifyLoginUrl(); }}
-                >
-                  Log in with Spotify
-                </Button>
               )}
+              <Button
+                type="button"
+                variant="outline"
+                className="border-zinc-600"
+                onClick={() => { window.location.href = getSpotifyLoginUrl(); }}
+              >
+                {spotifyLoggedIn ? "Reconnect Spotify" : "Log in with Spotify"}
+              </Button>
             </div>
             <div className="space-y-2">
               <Label htmlFor="playlist-url">Spotify playlist URL</Label>
