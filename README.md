@@ -47,7 +47,7 @@ npm install
 npm run dev
 ```
 
-Open **http://localhost:3000**. Paste a Spotify playlist URL, click **Fetch lyrics**, then **Analyze**. Use **Explore** for the word cloud and sadness heatmap, and **Lyric Lab** for writing with suggestions and cliché highlighting.
+Open **http://localhost:3000**. Paste a Spotify playlist, album, or artist URL, click **Fetch lyrics**, then **Analyze**. Use **Explore** for the word cloud and sadness heatmap, and **Lyric Lab** for writing with suggestions and cliché highlighting.
 
 ## Setup
 
@@ -91,7 +91,7 @@ GENIUS_ACCESS_TOKEN=...
 
 ## Features
 
-- **Dashboard:** Paste a Spotify playlist URL → Fetch lyrics (Spotify + Genius) → Analyze (word frequency, sentiment, POS, topic modeling). Data stored in SQLite.
+- **Dashboard:** Paste a Spotify playlist, album, or artist URL → Fetch lyrics (Spotify + Genius, with LRCLIB fallback) → Analyze (word frequency, sentiment, POS, topic modeling). Data stored in SQLite. Playlists require Spotify login; albums and artists don't. Artist fetch pulls the whole discography (albums + singles, deduped, capped at 150 tracks).
 - **Explore:** Interactive word cloud (click a word to see lyric lines) and sadness-by-track bar chart.
 - **Lyric Lab:** Text area for writing; suggestions for rhymes and thematic words from the corpus; list of words that appear in >50% of dataset songs (overused/cliché).
 

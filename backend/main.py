@@ -22,7 +22,7 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 from spotipy import Spotify
 
 from backend.cleaner import clean_lyrics
-from backend.fetch import _TokenAuth, extract_playlist_id, fetch_playlist
+from backend.fetch import _TokenAuth, extract_spotify_ref, fetch_source
 from backend.analyze import tokenize_lyrics, top_n_words, build_word_contexts
 from backend.nlp import sentiment_scores, top_n_by_pos, run_lda
 from backend import db
@@ -178,13 +178,14 @@ def api_auth_status(request: Request):
 
 @app.post("/api/fetch", response_model=FetchResponse)
 def api_fetch(body: FetchRequest, request: Request):
-    """Fetch playlist from Spotify and lyrics from Genius; clean and store in DB. Uses Spotify OAuth token if present."""
-    playlist_id = extract_playlist_id(body.playlist_url)
-    if not playlist_id:
-        raise HTTPException(status_code=400, detail="Invalid playlist URL or ID")
+    """Fetch a playlist, album, or artist from Spotify plus lyrics; clean and store in DB. Uses Spotify OAuth token if present."""
+    ref = extract_spotify_ref(body.playlist_url)
+    if not ref:
+        raise HTTPException(status_code=400, detail="Invalid Spotify URL. Paste a playlist, album, or artist link.")
+    kind, source_id = ref
     spotify_token = _get_spotify_token_from_request(request)
     try:
-        raw_tracks = fetch_playlist(body.playlist_url, spotify_access_token=spotify_token)
+        kind, source_id, source_name, raw_tracks = fetch_source(body.playlist_url, spotify_access_token=spotify_token)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:
@@ -214,12 +215,12 @@ def api_fetch(body: FetchRequest, request: Request):
         if "404" in msg or "not found" in msg_lower:
             # Spotify-generated playlists (Made For You, Daily Mix, editorial) start with
             # 37i9dQZF and have been blocked from the Web API since Nov 2024 — they 404 for everyone.
-            if playlist_id.startswith("37i9dQZF"):
+            if kind == "playlist" and source_id.startswith("37i9dQZF"):
                 raise HTTPException(
                     status_code=404,
                     detail="This is a Spotify-made playlist (Made For You / Daily Mix / editorial). Spotify blocks these from its API, so they can't be fetched. Use a playlist created by a person — e.g. one of your own.",
                 )
-            raise HTTPException(status_code=404, detail="Playlist not found. Check the URL and that the playlist is public.")
+            raise HTTPException(status_code=404, detail=f"{kind.capitalize()} not found. Check the URL and that it is public.")
         if "403" in msg or "forbidden" in msg_lower:
             if not spotify_token:
                 raise HTTPException(
@@ -234,18 +235,20 @@ def api_fetch(body: FetchRequest, request: Request):
         detail = msg.split("\n")[0][:200] if msg else "Fetch failed."
         raise HTTPException(status_code=500, detail=detail)
     if not raw_tracks:
-        raise HTTPException(status_code=400, detail="Playlist is empty or could not be read.")
+        raise HTTPException(status_code=400, detail=f"{kind.capitalize()} is empty or could not be read.")
     # Clean lyrics and add cleaned_lyrics
     for t in raw_tracks:
         t["raw_lyrics"] = t.get("lyrics")
         t["cleaned_lyrics"] = clean_lyrics(t.get("lyrics")) if t.get("lyrics") else None
-    playlist_pk = db.insert_playlist(playlist_id)
+    playlist_pk = db.insert_playlist(source_id, name=source_name)
     db.insert_tracks(playlist_pk, raw_tracks)
+    with_lyrics = sum(1 for t in raw_tracks if t.get("lyrics"))
+    label = f" from {source_name}" if source_name else ""
     return FetchResponse(
         ok=True,
-        message=f"Fetched {len(raw_tracks)} tracks.",
+        message=f"Fetched {len(raw_tracks)} tracks{label} ({with_lyrics} with lyrics).",
         track_count=len(raw_tracks),
-        playlist_id=playlist_id,
+        playlist_id=source_id,
     )
 
 

@@ -100,7 +100,7 @@ export default function DashboardPage() {
 
   const onFetch = async () => {
     if (!playlistUrl.trim()) {
-      setMessage({ type: "error", text: "Enter a playlist URL." });
+      setMessage({ type: "error", text: "Enter a Spotify playlist, album, or artist URL." });
       return;
     }
     setLoading("fetch");
@@ -146,7 +146,7 @@ export default function DashboardPage() {
         <Card className="bg-zinc-900 border-zinc-800">
           <CardHeader>
             <CardTitle>Data pipeline</CardTitle>
-            <CardDescription>Paste a Spotify playlist URL, fetch lyrics, then run analysis. Spotify requires you to log in once to read playlists.</CardDescription>
+            <CardDescription>Paste a Spotify playlist, album, or artist URL, fetch lyrics, then run analysis. Spotify requires you to log in once to read playlists; albums and artists work without login.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex flex-wrap gap-3 items-center">
@@ -162,14 +162,14 @@ export default function DashboardPage() {
                 </a>
               </Button>
               {!authChecking && !spotifyLoggedIn && (
-                <span className="text-zinc-500 text-sm">Required to fetch private playlists</span>
+                <span className="text-zinc-500 text-sm">Required to fetch playlists (not albums/artists)</span>
               )}
             </div>
             <div className="space-y-2">
-              <Label htmlFor="playlist-url">Spotify playlist URL</Label>
+              <Label htmlFor="playlist-url">Spotify playlist, album, or artist URL</Label>
               <Input
                 id="playlist-url"
-                placeholder="https://open.spotify.com/playlist/..."
+                placeholder="https://open.spotify.com/playlist/… or /album/… or /artist/…"
                 value={playlistUrl}
                 onChange={(e) => setPlaylistUrl(e.target.value)}
                 className="bg-zinc-800 border-zinc-700"
@@ -215,8 +215,8 @@ export default function DashboardPage() {
             {status && (
               <p className="text-zinc-500 text-sm">
                 {status.has_data
-                  ? `Fetched ${status.track_count} tracks.${status.last_analyzed ? " Analysis complete." : " Run Analyze to see results."}`
-                  : "Run fetch first with a playlist URL."}
+                  ? `Fetched ${status.track_count} tracks${status.playlist_name ? ` from “${status.playlist_name}”` : ""}.${status.last_analyzed ? " Analysis complete." : " Run Analyze to see results."}`
+                  : "Run fetch first with a playlist, album, or artist URL."}
               </p>
             )}
           </CardContent>

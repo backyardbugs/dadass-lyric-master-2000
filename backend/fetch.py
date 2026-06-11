@@ -6,7 +6,8 @@ from __future__ import annotations
 
 import os
 import re
-import time
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import requests
@@ -32,35 +33,45 @@ class _TokenAuth:
 
 def extract_playlist_id(url: str) -> str | None:
     """Extract Spotify playlist ID from URL or raw ID."""
+    ref = extract_spotify_ref(url)
+    return ref[1] if ref and ref[0] == "playlist" else None
+
+
+def extract_spotify_ref(url: str) -> tuple[str, str] | None:
+    """Extract (kind, id) from a Spotify playlist/album/artist URL, URI, or raw ID.
+    Raw 22-char IDs are assumed to be playlists."""
     if not url or not url.strip():
         return None
     url = url.strip()
     if re.match(r"^[a-zA-Z0-9]{22}$", url):
-        return url
-    m = re.search(r"spotify:playlist:([a-zA-Z0-9]{22})", url)
-    if m:
-        return m.group(1)
-    m = re.search(r"open\.spotify\.com/playlist/([a-zA-Z0-9]{22})", url)
-    if m:
-        return m.group(1)
+        return ("playlist", url)
+    for kind in ("playlist", "album", "artist"):
+        m = re.search(rf"spotify:{kind}:([a-zA-Z0-9]{{22}})", url)
+        if m:
+            return (kind, m.group(1))
+        m = re.search(rf"open\.spotify\.com/(?:intl-[a-z\-]+/)?{kind}/([a-zA-Z0-9]{{22}})", url)
+        if m:
+            return (kind, m.group(1))
     return None
+
+
+def _spotify_client(access_token: str | None = None) -> Spotify:
+    """Spotify client from a user OAuth token, or app client credentials."""
+    if access_token:
+        return Spotify(auth_manager=_TokenAuth(access_token))
+    client_id = os.getenv("SPOTIPY_CLIENT_ID")
+    client_secret = os.getenv("SPOTIPY_CLIENT_SECRET")
+    if not client_id or not client_secret:
+        raise RuntimeError("Set SPOTIPY_CLIENT_ID and SPOTIPY_CLIENT_SECRET in .env")
+    return Spotify(auth_manager=SpotifyClientCredentials(client_id=client_id, client_secret=client_secret))
 
 
 def get_spotify_tracks(playlist_id: str, access_token: str | None = None) -> list[dict]:
     """Fetch all tracks from a Spotify playlist. Use access_token (OAuth) for any playlist; else client credentials (public only, may 403)."""
-    if access_token:
-        auth = _TokenAuth(access_token)
-        sp = Spotify(auth_manager=auth)
-        market = None
-    else:
-        client_id = os.getenv("SPOTIPY_CLIENT_ID")
-        client_secret = os.getenv("SPOTIPY_CLIENT_SECRET")
-        if not client_id or not client_secret:
-            raise RuntimeError("Set SPOTIPY_CLIENT_ID and SPOTIPY_CLIENT_SECRET in .env")
-        auth = SpotifyClientCredentials(client_id=client_id, client_secret=client_secret)
-        sp = Spotify(auth_manager=auth)
-        market = os.getenv("SPOTIFY_MARKET", "US")
+    sp = _spotify_client(access_token)
+    market = None if access_token else os.getenv("SPOTIFY_MARKET", "US")
     tracks = []
+    skipped = 0
     offset = 0
     limit = 50
     while True:
@@ -71,6 +82,7 @@ def get_spotify_tracks(playlist_id: str, access_token: str | None = None) -> lis
         for item in items:
             track = item.get("track")
             if not track or track.get("is_local") or not track.get("name"):
+                skipped += 1
                 continue
             artists = track.get("artists") or []
             artist_name = ", ".join(a.get("name", "") for a in artists) or "Unknown"
@@ -82,7 +94,101 @@ def get_spotify_tracks(playlist_id: str, access_token: str | None = None) -> lis
         offset += len(items)
         if len(items) < limit:
             break
+    if not tracks and skipped:
+        raise ValueError(
+            "This playlist only contains local files or podcast episodes, which Spotify's API can't read."
+        )
     return tracks
+
+
+def get_playlist_data(playlist_id: str, access_token: str | None = None) -> tuple[str | None, list[dict]]:
+    """Return (playlist_name, tracks) for a playlist."""
+    tracks = get_spotify_tracks(playlist_id, access_token=access_token)
+    name = None
+    try:
+        sp = _spotify_client(access_token)
+        name = (sp.playlist(playlist_id, fields="name") or {}).get("name")
+    except Exception:
+        pass
+    return name, tracks
+
+
+def get_album_data(album_id: str, access_token: str | None = None) -> tuple[str, list[dict]]:
+    """Return ("Artist — Album", tracks) for an album. Works with app credentials (no login)."""
+    sp = _spotify_client(access_token)
+    album = sp.album(album_id)
+    album_artist = ", ".join(a.get("name", "") for a in album.get("artists") or []) or "Unknown"
+    name = f"{album_artist} — {album.get('name', '')}".strip(" —")
+    tracks = []
+    page = album.get("tracks") or {}
+    while True:
+        for tr in page.get("items") or []:
+            if not tr or not tr.get("name"):
+                continue
+            artist = ", ".join(a.get("name", "") for a in tr.get("artists") or []) or album_artist
+            tracks.append({
+                "spotify_id": tr.get("id"),
+                "artist": artist,
+                "title": tr["name"].strip(),
+            })
+        if not page.get("next"):
+            break
+        page = sp.next(page)
+    return name, tracks
+
+
+def _dedupe_title_key(title: str) -> str:
+    """Normalize a title so 'Song', 'Song - Acoustic' and 'Song (Remastered)' dedupe together."""
+    base = title.split(" - ")[0]
+    base = re.sub(r"\s*[\(\[].*?[\)\]]", "", base)
+    return base.lower().strip()
+
+
+def get_artist_data(
+    artist_id: str, access_token: str | None = None, max_tracks: int = 150
+) -> tuple[str, list[dict]]:
+    """Return (artist_name, tracks) across the artist's albums and singles, deduped by title.
+    Works with app credentials (no login). Capped at max_tracks to keep lyric fetching bounded."""
+    sp = _spotify_client(access_token)
+    artist = sp.artist(artist_id)
+    name = artist.get("name") or "Unknown"
+
+    album_ids = []
+    # Spotify rejects limits above 10 on this endpoint for newer apps ("Invalid limit")
+    page = sp.artist_albums(artist_id, include_groups="album,single", limit=10)
+    while page:
+        for a in page.get("items") or []:
+            if a and a.get("id"):
+                album_ids.append(a["id"])
+        page = sp.next(page) if page.get("next") else None
+
+    tracks: list[dict] = []
+    seen: set[str] = set()
+    # Fetch per album: the batch /v1/albums?ids= endpoint is 403 Forbidden for newer apps.
+    for album_id in album_ids:
+        if len(tracks) >= max_tracks:
+            break
+        try:
+            page = sp.album_tracks(album_id, limit=50)
+        except Exception:
+            continue
+        while page:
+            for tr in page.get("items") or []:
+                if not tr or not tr.get("name"):
+                    continue
+                if artist_id not in [a.get("id") for a in tr.get("artists") or []]:
+                    continue
+                key = _dedupe_title_key(tr["name"])
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                tracks.append({
+                    "spotify_id": tr.get("id"),
+                    "artist": name,
+                    "title": tr["name"].strip(),
+                })
+            page = sp.next(page) if page.get("next") else None
+    return name, tracks[:max_tracks]
 
 
 _LRCLIB_UA = "EmoAlmanac/0.1.0"
@@ -130,43 +236,64 @@ def fetch_lyrics_for_tracks(tracks: list[dict], genius_token: str | None = None)
     genius = Genius(token)
     genius.remove_section_headers = True
     genius.skip_non_songs = True
-    results = []
-    for i, t in enumerate(tracks):
-        if i > 0:
-            time.sleep(0.4)
+    genius_blocked = threading.Event()
+
+    def resolve(t: dict) -> dict:
         artist, title = t["artist"], t["title"]
+        # Strip version suffixes ("Song - 2025 Mix", "Song - Live") for better search hits
+        search_title = re.sub(r"\s+-\s.*$", "", title).strip() or title
         lyrics = None
-        try:
-            song = genius.search_song(title, artist)
-            if song and getattr(song, "lyrics", None):
-                lyrics = song.lyrics.strip()
-        except Exception:
-            # Genius page scraping is often blocked (Cloudflare) from datacenter IPs
-            pass
+        if not genius_blocked.is_set():
+            try:
+                song = genius.search_song(search_title, artist)
+                if song and getattr(song, "lyrics", None):
+                    lyrics = song.lyrics.strip()
+            except Exception as e:
+                # Cloudflare blocks Genius page scraping from datacenter IPs; once we see a
+                # 403, stop wasting time on Genius for the rest of the batch.
+                if "403" in str(e):
+                    genius_blocked.set()
         if not lyrics:
-            lyrics = _fetch_lyrics_lrclib(artist, title)
-        results.append({
+            lyrics = _fetch_lyrics_lrclib(artist, search_title)
+        return {
             "spotify_id": t.get("spotify_id"),
             "artist": artist,
             "title": title,
             "lyrics": lyrics,
-        })
-    return results
+        }
+
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        return list(ex.map(resolve, tracks))
+
+
+def fetch_source(url: str, spotify_access_token: str | None = None) -> tuple[str, str, str | None, list[dict]]:
+    """
+    Full fetch for a playlist, album, or artist URL: Spotify tracks -> lyrics.
+    Playlists need a user OAuth token (Spotify policy); albums and artists work with app credentials.
+    Returns (kind, spotify_id, name, tracks) where tracks are {artist, title, spotify_id, lyrics}.
+    """
+    ref = extract_spotify_ref(url)
+    if not ref:
+        raise ValueError("Invalid Spotify URL. Paste a playlist, album, or artist link.")
+    kind, source_id = ref
+    if kind == "playlist":
+        name, tracks = get_playlist_data(source_id, access_token=spotify_access_token)
+    elif kind == "album":
+        name, tracks = get_album_data(source_id, access_token=spotify_access_token)
+    else:
+        name, tracks = get_artist_data(source_id, access_token=spotify_access_token)
+    if not tracks:
+        raise ValueError(f"{kind.capitalize()} is empty or could not be read")
+    return kind, source_id, name, fetch_lyrics_for_tracks(tracks)
 
 
 def fetch_playlist(playlist_url: str, spotify_access_token: str | None = None) -> list[dict]:
     """
-    Full fetch: parse URL -> Spotify tracks -> Genius lyrics.
-    Use spotify_access_token (from OAuth) to read any playlist; without it, client credentials may 403.
-    Returns list of {artist, title, spotify_id, lyrics}.
+    Full fetch: parse URL -> Spotify tracks -> lyrics.
+    Accepts playlist, album, or artist URLs. Returns list of {artist, title, spotify_id, lyrics}.
     """
-    playlist_id = extract_playlist_id(playlist_url)
-    if not playlist_id:
-        raise ValueError("Invalid playlist URL or ID")
-    tracks = get_spotify_tracks(playlist_id, access_token=spotify_access_token)
-    if not tracks:
-        raise ValueError("Playlist is empty or could not be read")
-    return fetch_lyrics_for_tracks(tracks)
+    _, _, _, tracks = fetch_source(playlist_url, spotify_access_token=spotify_access_token)
+    return tracks
 
 
 if __name__ == "__main__":
