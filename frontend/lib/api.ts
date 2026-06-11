@@ -144,8 +144,41 @@ export async function getWordContext(word: string): Promise<{ word: string; cont
   return fetchApi(`/api/word-context?word=${encodeURIComponent(word)}`);
 }
 
-export async function getTopics(): Promise<{ topics: { id: number; label: string; topic_index: number }[] }> {
+export type Topic = {
+  id: number;
+  label: string;
+  topic_index: number;
+  top_tracks: { title: string; artist: string; weight: number }[];
+};
+
+export async function getTopics(): Promise<{ topics: Topic[] }> {
   return fetchApi("/api/topics");
+}
+
+export type Superlative = { title: string; artist: string; value: number } | null;
+
+export type Stats = {
+  has_data: boolean;
+  name?: string | null;
+  track_count?: number;
+  total_words?: number;
+  unique_words?: number;
+  avg_words_per_track?: number;
+  avg_sadness?: number;
+  avg_anger?: number;
+  avg_nostalgia?: number;
+  superlatives?: {
+    saddest: Superlative;
+    angriest: Superlative;
+    most_nostalgic: Superlative;
+    biggest_vocabulary: Superlative;
+    most_repetitive: Superlative;
+    wordiest: Superlative;
+  };
+};
+
+export async function getStats(): Promise<Stats> {
+  return fetchApi("/api/stats");
 }
 
 export async function getSuggestRhymes(word: string): Promise<{ word: string; rhymes: string[] }> {

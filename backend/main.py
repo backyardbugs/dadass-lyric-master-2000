@@ -417,7 +417,7 @@ def api_word_context(word: str):
 
 @app.get("/api/topics")
 def api_topics():
-    """Return topic labels and optionally songs per topic from latest run."""
+    """Return topic labels with the top tracks for each topic from the latest run."""
     run_id = db.get_latest_run_id()
     if run_id is None:
         return {"topics": []}
@@ -429,14 +429,89 @@ def api_topics():
         ).fetchall()
         topics = []
         for r in rows:
+            track_rows = conn.execute(
+                """SELECT t.title, t.artist, tt.weight FROM track_topic tt
+                   JOIN track t ON t.id = tt.track_id
+                   WHERE tt.run_id = ? AND tt.topic_id = ?
+                   ORDER BY tt.weight DESC LIMIT 3""",
+                (run_id, r[0]),
+            ).fetchall()
             topics.append({
                 "id": r[0],
                 "label": r[1],
                 "topic_index": r[2],
+                "top_tracks": [
+                    {"title": tr[0], "artist": tr[1], "weight": tr[2]} for tr in track_rows
+                ],
             })
         return {"topics": topics}
     finally:
         conn.close()
+
+
+_WORD_RE = re.compile(r"[a-zà-ÿ']+")
+
+
+@app.get("/api/stats")
+def api_stats():
+    """Corpus stats and superlatives for the latest dataset (for the Explore page)."""
+    playlist_pk = db.get_latest_playlist_id()
+    if playlist_pk is None:
+        return {"has_data": False}
+    tracks = db.get_tracks(playlist_pk)
+    if not tracks:
+        return {"has_data": False}
+    info = db.get_playlist_info(playlist_pk)
+
+    vocab: set[str] = set()
+    total_words = 0
+    per_track = []
+    for t in tracks:
+        text = (t.get("cleaned_lyrics") or t.get("raw_lyrics") or "").lower()
+        words = _WORD_RE.findall(text)
+        n, u = len(words), len(set(words))
+        total_words += n
+        vocab.update(words)
+        per_track.append({
+            "title": t["title"],
+            "artist": t["artist"],
+            "words": n,
+            "unique": u,
+            "diversity": (u / n) if n else 0.0,
+            "sadness": t.get("sentiment_sadness") or 0.0,
+            "anger": t.get("sentiment_anger") or 0.0,
+            "nostalgia": t.get("sentiment_nostalgia") or 0.0,
+        })
+
+    scored = [p for p in per_track if p["words"] > 0]
+    substantial = [p for p in scored if p["words"] >= 40] or scored
+
+    def _pick(items, key, reverse=True):
+        if not items:
+            return None
+        p = sorted(items, key=lambda x: x[key], reverse=reverse)[0]
+        return {"title": p["title"], "artist": p["artist"], "value": round(p[key], 3)}
+
+    n_tracks = len(per_track)
+    return {
+        "has_data": True,
+        "name": (info or {}).get("name") or None,
+        "track_count": n_tracks,
+        "total_words": total_words,
+        "unique_words": len(vocab),
+        "avg_words_per_track": round(total_words / n_tracks, 1) if n_tracks else 0,
+        "avg_sadness": round(sum(p["sadness"] for p in per_track) / n_tracks, 4) if n_tracks else 0,
+        "avg_anger": round(sum(p["anger"] for p in per_track) / n_tracks, 4) if n_tracks else 0,
+        "avg_nostalgia": round(sum(p["nostalgia"] for p in per_track) / n_tracks, 4) if n_tracks else 0,
+        "superlatives": {
+            "saddest": _pick(scored, "sadness"),
+            "angriest": _pick(scored, "anger"),
+            "most_nostalgic": _pick(scored, "nostalgia"),
+            "biggest_vocabulary": _pick(substantial, "unique"),
+            "most_repetitive": _pick(substantial, "diversity", reverse=False),
+            "wordiest": _pick(scored, "words"),
+        },
+    }
 
 
 # --- Lyric Lab: suggestions and cliche check ---

@@ -11,12 +11,28 @@ import {
 } from "@/components/ui/dialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { WordCloud } from "@/components/word-cloud";
-import { SentimentHeatmap } from "@/components/sentiment-heatmap";
-import { getTopWords, getSentimentHeatmap, getWordContext } from "@/lib/api";
+import { EmoMeter } from "@/components/emo-meter";
+import { StatCards } from "@/components/stat-cards";
+import { MoodMap } from "@/components/mood-map";
+import { MoodFlow } from "@/components/mood-flow";
+import { EmotionGrid } from "@/components/emotion-grid";
+import { TopicBubbles } from "@/components/topic-bubbles";
+import {
+  getTopWords,
+  getSentimentHeatmap,
+  getWordContext,
+  getStats,
+  getTopics,
+  type Stats,
+  type Topic,
+  type HeatmapTrack,
+} from "@/lib/api";
 
 export default function ExplorePage() {
   const [topWords, setTopWords] = useState<{ word: string; count: number }[]>([]);
-  const [heatmapTracks, setHeatmapTracks] = useState<Awaited<ReturnType<typeof getSentimentHeatmap>>["tracks"]>([]);
+  const [heatmapTracks, setHeatmapTracks] = useState<HeatmapTrack[]>([]);
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [topics, setTopics] = useState<Topic[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedWord, setSelectedWord] = useState<string | null>(null);
   const [contexts, setContexts] = useState<{ line: string; artist: string; title: string }[]>([]);
@@ -25,16 +41,17 @@ export default function ExplorePage() {
   useEffect(() => {
     (async () => {
       setLoading(true);
-      try {
-        const [wordsRes, heatRes] = await Promise.all([getTopWords(undefined, 100), getSentimentHeatmap()]);
-        setTopWords(wordsRes.top_words);
-        setHeatmapTracks(heatRes.tracks);
-      } catch {
-        setTopWords([]);
-        setHeatmapTracks([]);
-      } finally {
-        setLoading(false);
-      }
+      const [wordsRes, heatRes, statsRes, topicsRes] = await Promise.allSettled([
+        getTopWords(undefined, 100),
+        getSentimentHeatmap(),
+        getStats(),
+        getTopics(),
+      ]);
+      setTopWords(wordsRes.status === "fulfilled" ? wordsRes.value.top_words : []);
+      setHeatmapTracks(heatRes.status === "fulfilled" ? heatRes.value.tracks : []);
+      setStats(statsRes.status === "fulfilled" && statsRes.value.has_data ? statsRes.value : null);
+      setTopics(topicsRes.status === "fulfilled" ? topicsRes.value.topics : []);
+      setLoading(false);
     })();
   }, []);
 
@@ -54,9 +71,20 @@ export default function ExplorePage() {
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 p-6">
-      <div className="max-w-4xl mx-auto space-y-8">
-        <header className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold">Explore</h1>
+      <div className="max-w-5xl mx-auto space-y-6">
+        <header className="flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <h1 className="text-3xl font-black tracking-tight">Explore</h1>
+            <p className="text-zinc-500 text-sm">
+              {stats?.name ? (
+                <>
+                  Dissecting <span className="text-zinc-300 font-semibold">{stats.name}</span>, one feeling at a time.
+                </>
+              ) : (
+                "Every feeling, charted."
+              )}
+            </p>
+          </div>
           <Button asChild variant="outline" size="sm" className="border-zinc-600">
             <Link href="/">Back to dashboard</Link>
           </Button>
@@ -66,10 +94,42 @@ export default function ExplorePage() {
           <p className="text-zinc-500">Loading…</p>
         ) : (
           <>
+            <div className="grid lg:grid-cols-5 gap-6">
+              <Card className="bg-zinc-900 border-zinc-800 lg:col-span-2">
+                <CardHeader>
+                  <CardTitle>The Emo-Meter</CardTitle>
+                  <CardDescription>Official mope rating of this dataset.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {stats ? (
+                    <EmoMeter
+                      sadness={stats.avg_sadness ?? 0}
+                      anger={stats.avg_anger ?? 0}
+                      nostalgia={stats.avg_nostalgia ?? 0}
+                    />
+                  ) : (
+                    <p className="text-zinc-500 text-sm">Run analysis first.</p>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card className="bg-zinc-900 border-zinc-800 lg:col-span-3">
+                <CardHeader>
+                  <CardTitle>Hall of Feelings</CardTitle>
+                  <CardDescription>Superlatives, as voted by the math.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {stats ? <StatCards stats={stats} /> : <p className="text-zinc-500 text-sm">Run analysis first.</p>}
+                </CardContent>
+              </Card>
+            </div>
+
             <Card className="bg-zinc-900 border-zinc-800">
               <CardHeader>
                 <CardTitle>Word cloud</CardTitle>
-                <CardDescription>Click a word to see where it appears in the lyrics.</CardDescription>
+                <CardDescription>
+                  The vocabulary of heartbreak. Filter by part of speech, click a word to see its lyric lines.
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 <WordCloud words={topWords} onWordClick={onWordClick} />
@@ -78,11 +138,47 @@ export default function ExplorePage() {
 
             <Card className="bg-zinc-900 border-zinc-800">
               <CardHeader>
-                <CardTitle>Sadness by track</CardTitle>
-                <CardDescription>Playlist order vs. sadness score.</CardDescription>
+                <CardTitle>Mood Map</CardTitle>
+                <CardDescription>
+                  Every track plotted by sadness and anger. Bigger bubble = more nostalgia. Hover for details.
+                </CardDescription>
               </CardHeader>
               <CardContent>
-                <SentimentHeatmap tracks={heatmapTracks} />
+                <MoodMap tracks={heatmapTracks} />
+              </CardContent>
+            </Card>
+
+            <div className="grid lg:grid-cols-2 gap-6">
+              <Card className="bg-zinc-900 border-zinc-800">
+                <CardHeader>
+                  <CardTitle>The Emotional Arc</CardTitle>
+                  <CardDescription>How the feelings rise and fall across the tracklist.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <MoodFlow tracks={heatmapTracks} />
+                </CardContent>
+              </Card>
+
+              <Card className="bg-zinc-900 border-zinc-800">
+                <CardHeader>
+                  <CardTitle>Feelings, pixel by pixel</CardTitle>
+                  <CardDescription>Heatmap of all three emotions for every track.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <EmotionGrid tracks={heatmapTracks} />
+                </CardContent>
+              </Card>
+            </div>
+
+            <Card className="bg-zinc-900 border-zinc-800">
+              <CardHeader>
+                <CardTitle>Recurring vibes</CardTitle>
+                <CardDescription>
+                  Themes the topic model keeps finding, with the tracks that lean into them hardest.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <TopicBubbles topics={topics} />
               </CardContent>
             </Card>
           </>
@@ -92,7 +188,7 @@ export default function ExplorePage() {
       <Dialog open={!!selectedWord} onOpenChange={(open) => !open && setSelectedWord(null)}>
         <DialogContent className="bg-zinc-900 border-zinc-800 max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>“{selectedWord}” in the dataset</DialogTitle>
+            <DialogTitle>&ldquo;{selectedWord}&rdquo; in the dataset</DialogTitle>
           </DialogHeader>
           {contextLoading ? (
             <p className="text-zinc-500">Loading…</p>
@@ -103,7 +199,9 @@ export default function ExplorePage() {
               {contexts.map((c, i) => (
                 <li key={i} className="border-b border-zinc-800 pb-2">
                   <p className="text-zinc-200 italic">&ldquo;{c.line}&rdquo;</p>
-                  <p className="text-zinc-500 mt-1">{c.artist} — {c.title}</p>
+                  <p className="text-zinc-500 mt-1">
+                    {c.artist} — {c.title}
+                  </p>
                 </li>
               ))}
             </ul>
