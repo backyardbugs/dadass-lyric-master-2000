@@ -2,14 +2,12 @@
 
 import type { Stats, Superlative } from "@/lib/api";
 
-function AwardCard({
-  award,
+function HighlightCard({
   title,
   item,
   format,
   accent,
 }: {
-  award: string;
   title: string;
   item: Superlative;
   format: (v: number) => string;
@@ -18,9 +16,8 @@ function AwardCard({
   if (!item) return null;
   return (
     <div className={`rounded-xl border border-zinc-800 bg-zinc-900/70 p-4 hover:border-zinc-600 hover:-translate-y-0.5 transition-all`}>
-      <p className={`text-[11px] uppercase tracking-widest font-semibold ${accent}`}>{award}</p>
-      <p className="text-sm text-zinc-500 mb-2">{title}</p>
-      <p className="font-bold leading-tight">{item.title}</p>
+      <p className={`text-[11px] uppercase tracking-widest font-semibold ${accent}`}>{title}</p>
+      <p className="font-bold leading-tight mt-2">{item.title}</p>
       <p className="text-xs text-zinc-500 truncate">{item.artist}</p>
       <p className={`text-sm mt-2 font-mono ${accent}`}>{format(item.value)}</p>
     </div>
@@ -48,25 +45,22 @@ export function StatCards({ stats }: { stats: Stats }) {
         </div>
       </div>
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        <AwardCard award="The Wettest Pillow" title="Saddest track" item={s.saddest} format={pct} accent="text-rose-400" />
-        <AwardCard award="Most Slammed Door" title="Angriest track" item={s.angriest} format={pct} accent="text-orange-400" />
-        <AwardCard award="Yearbook Signature" title="Most nostalgic" item={s.most_nostalgic} format={pct} accent="text-indigo-400" />
-        <AwardCard
-          award="Walking Thesaurus"
+        <HighlightCard title="Saddest track" item={s.saddest} format={pct} accent="text-rose-400" />
+        <HighlightCard title="Angriest track" item={s.angriest} format={pct} accent="text-orange-400" />
+        <HighlightCard title="Most nostalgic" item={s.most_nostalgic} format={pct} accent="text-indigo-400" />
+        <HighlightCard
           title="Biggest vocabulary"
           item={s.biggest_vocabulary}
           format={(v) => `${v} unique words`}
           accent="text-emerald-400"
         />
-        <AwardCard
-          award="Broken Record"
+        <HighlightCard
           title="Most repetitive"
           item={s.most_repetitive}
           format={(v) => `${(v * 100).toFixed(0)}% unique words`}
           accent="text-amber-400"
         />
-        <AwardCard
-          award="The Novelist"
+        <HighlightCard
           title="Wordiest track"
           item={s.wordiest}
           format={(v) => `${v} words`}

@@ -1,4 +1,4 @@
-# The Emo Almanac — Data Pipeline & Backend
+# Dad Ass Lyric Analyzer 3000 — Data Pipeline & Backend
 # Python 3.10+ recommended
 
 # Spotify API client

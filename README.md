@@ -1,6 +1,6 @@
-# The Emo Almanac
+# Dad Ass Lyric Analyzer 3000
 
-Lyric analysis and generative tools for Emo / Pop-Punk: analyze Spotify playlists, visualize sentiment and word frequency, and write with rhyme/thematic suggestions and a cliché detector.
+Lyric analysis and writing tools for any genre: analyze Spotify playlists, albums, or artists; visualize sentiment and word frequency; and write with rhyme/thematic suggestions and a cliché detector.
 
 **Frontend (deployed):** https://frontend-woad-xi-34.vercel.app — To use it with data, deploy the backend (e.g. Render) and set `NEXT_PUBLIC_API_URL` in Vercel to the backend URL, and set `CORS_ORIGINS` on the backend to the frontend URL.
 

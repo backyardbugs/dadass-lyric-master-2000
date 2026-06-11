@@ -22,7 +22,7 @@ export function TopicBubbles({ topics }: { topics: Topic[] }) {
           key={topic.id}
           className={`rounded-xl border bg-gradient-to-br p-4 hover:-translate-y-0.5 transition-transform ${GRADIENTS[i % GRADIENTS.length]}`}
         >
-          <p className="text-[11px] uppercase tracking-widest text-zinc-400 mb-2">vibe #{topic.topic_index + 1}</p>
+          <p className="text-[11px] uppercase tracking-widest text-zinc-400 mb-2">topic #{topic.topic_index + 1}</p>
           <div className="flex flex-wrap gap-1.5 mb-3">
             {topic.label.split(" / ").map((word) => (
               <span key={word} className="px-2 py-0.5 rounded-full bg-zinc-950/60 text-sm font-bold">

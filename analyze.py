@@ -1,5 +1,5 @@
 """
-analyze.py — The Emo Almanac NLP Pipeline (Phase 1)
+analyze.py — Dad Ass Lyric Analyzer 3000 NLP Pipeline (Phase 1)
 
 Loads raw lyrics from data/raw_lyrics.json and computes:
   - Top 50 most common words (excluding stopwords)

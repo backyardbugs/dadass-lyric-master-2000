@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { WordCloud } from "@/components/word-cloud";
-import { EmoMeter } from "@/components/emo-meter";
+import { MoodMeter } from "@/components/mood-meter";
 import { StatCards } from "@/components/stat-cards";
 import { MoodMap } from "@/components/mood-map";
 import { MoodFlow } from "@/components/mood-flow";
@@ -78,10 +78,10 @@ export default function ExplorePage() {
             <p className="text-zinc-500 text-sm">
               {stats?.name ? (
                 <>
-                  Dissecting <span className="text-zinc-300 font-semibold">{stats.name}</span>, one feeling at a time.
+                  Dataset: <span className="text-zinc-300 font-semibold">{stats.name}</span>
                 </>
               ) : (
-                "Every feeling, charted."
+                "Visualizations of your lyric dataset."
               )}
             </p>
           </div>
@@ -97,12 +97,12 @@ export default function ExplorePage() {
             <div className="grid lg:grid-cols-5 gap-6">
               <Card className="bg-zinc-900 border-zinc-800 lg:col-span-2">
                 <CardHeader>
-                  <CardTitle>The Emo-Meter</CardTitle>
-                  <CardDescription>Official mope rating of this dataset.</CardDescription>
+                  <CardTitle>Mood meter</CardTitle>
+                  <CardDescription>Overall emotional intensity of this dataset.</CardDescription>
                 </CardHeader>
                 <CardContent>
                   {stats ? (
-                    <EmoMeter
+                    <MoodMeter
                       sadness={stats.avg_sadness ?? 0}
                       anger={stats.avg_anger ?? 0}
                       nostalgia={stats.avg_nostalgia ?? 0}
@@ -115,8 +115,8 @@ export default function ExplorePage() {
 
               <Card className="bg-zinc-900 border-zinc-800 lg:col-span-3">
                 <CardHeader>
-                  <CardTitle>Hall of Feelings</CardTitle>
-                  <CardDescription>Superlatives, as voted by the math.</CardDescription>
+                  <CardTitle>Highlights</CardTitle>
+                  <CardDescription>Standout tracks and dataset totals.</CardDescription>
                 </CardHeader>
                 <CardContent>
                   {stats ? <StatCards stats={stats} /> : <p className="text-zinc-500 text-sm">Run analysis first.</p>}
@@ -128,7 +128,7 @@ export default function ExplorePage() {
               <CardHeader>
                 <CardTitle>Word cloud</CardTitle>
                 <CardDescription>
-                  The vocabulary of heartbreak. Filter by part of speech, click a word to see its lyric lines.
+                  Filter by part of speech, click a word to see its lyric lines.
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -138,7 +138,7 @@ export default function ExplorePage() {
 
             <Card className="bg-zinc-900 border-zinc-800">
               <CardHeader>
-                <CardTitle>Mood Map</CardTitle>
+                <CardTitle>Mood map</CardTitle>
                 <CardDescription>
                   Every track plotted by sadness and anger. Bigger bubble = more nostalgia. Hover for details.
                 </CardDescription>
@@ -151,8 +151,8 @@ export default function ExplorePage() {
             <div className="grid lg:grid-cols-2 gap-6">
               <Card className="bg-zinc-900 border-zinc-800">
                 <CardHeader>
-                  <CardTitle>The Emotional Arc</CardTitle>
-                  <CardDescription>How the feelings rise and fall across the tracklist.</CardDescription>
+                  <CardTitle>Emotional arc</CardTitle>
+                  <CardDescription>How each emotion rises and falls across the tracklist.</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <MoodFlow tracks={heatmapTracks} />
@@ -161,8 +161,8 @@ export default function ExplorePage() {
 
               <Card className="bg-zinc-900 border-zinc-800">
                 <CardHeader>
-                  <CardTitle>Feelings, pixel by pixel</CardTitle>
-                  <CardDescription>Heatmap of all three emotions for every track.</CardDescription>
+                  <CardTitle>Emotion heatmap</CardTitle>
+                  <CardDescription>All three emotions for every track.</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <EmotionGrid tracks={heatmapTracks} />
@@ -172,9 +172,9 @@ export default function ExplorePage() {
 
             <Card className="bg-zinc-900 border-zinc-800">
               <CardHeader>
-                <CardTitle>Recurring vibes</CardTitle>
+                <CardTitle>Topics</CardTitle>
                 <CardDescription>
-                  Themes the topic model keeps finding, with the tracks that lean into them hardest.
+                  Themes found by the topic model, with the tracks that match each one most strongly.
                 </CardDescription>
               </CardHeader>
               <CardContent>

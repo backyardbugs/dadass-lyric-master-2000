@@ -191,7 +191,7 @@ def get_artist_data(
     return name, tracks[:max_tracks]
 
 
-_LRCLIB_UA = "EmoAlmanac/0.1.0"
+_LRCLIB_UA = "DadAssLyricAnalyzer/0.1.0"
 
 
 def _fetch_lyrics_lrclib(artist: str, title: str) -> str | None:

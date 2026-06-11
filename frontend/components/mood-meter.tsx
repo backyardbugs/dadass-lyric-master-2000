@@ -2,23 +2,23 @@
 
 import { useEffect, useState } from "react";
 
-/** Blend the three emotions into a 0–100 "emo score". Raw averages live around
- * 0–0.25, so scale up so a typically mopey corpus lands mid-dial. */
-export function emoScore(sadness: number, anger: number, nostalgia: number): number {
+/** Blend the three emotions into a 0–100 intensity score. Raw averages live
+ * around 0–0.25, so scale up so a typical dataset lands mid-dial. */
+export function intensityScore(sadness: number, anger: number, nostalgia: number): number {
   const blended = sadness * 0.55 + anger * 0.2 + nostalgia * 0.25;
   return Math.min(100, Math.round(blended * 450));
 }
 
-const RANKS: { min: number; label: string; blurb: string }[] = [
-  { min: 80, label: "Full Black Parade", blurb: "Carry on. There is nothing left to feel but everything." },
-  { min: 60, label: "Heavy Eyeliner Hours", blurb: "The basement show of the soul is sold out." },
-  { min: 40, label: "Certified Mopey", blurb: "Staring out rainy windows at a professional level." },
-  { min: 20, label: "Mildly Misty", blurb: "A single tear, artfully placed." },
-  { min: 0, label: "Suspiciously Sunny", blurb: "Are these even emo lyrics? Someone check." },
+const LEVELS: { min: number; label: string }[] = [
+  { min: 80, label: "Very heavy" },
+  { min: 60, label: "Heavy" },
+  { min: 40, label: "Moderate" },
+  { min: 20, label: "Mild" },
+  { min: 0, label: "Light" },
 ];
 
-export function rankFor(score: number) {
-  return RANKS.find((r) => score >= r.min) ?? RANKS[RANKS.length - 1];
+export function levelFor(score: number) {
+  return LEVELS.find((l) => score >= l.min) ?? LEVELS[LEVELS.length - 1];
 }
 
 function polar(cx: number, cy: number, r: number, deg: number) {
@@ -33,9 +33,9 @@ function arcPath(cx: number, cy: number, r: number, startDeg: number, endDeg: nu
   return `M ${s.x.toFixed(2)} ${s.y.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${e.x.toFixed(2)} ${e.y.toFixed(2)}`;
 }
 
-export function EmoMeter({ sadness, anger, nostalgia }: { sadness: number; anger: number; nostalgia: number }) {
-  const score = emoScore(sadness, anger, nostalgia);
-  const rank = rankFor(score);
+export function MoodMeter({ sadness, anger, nostalgia }: { sadness: number; anger: number; nostalgia: number }) {
+  const score = intensityScore(sadness, anger, nostalgia);
+  const level = levelFor(score);
   // Animate the needle sweeping from 0 on mount
   const [shown, setShown] = useState(0);
   useEffect(() => {
@@ -55,7 +55,7 @@ export function EmoMeter({ sadness, anger, nostalgia }: { sadness: number; anger
     <div className="flex flex-col items-center">
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full max-w-[280px]">
         <defs>
-          <linearGradient id="emo-arc" x1="0%" y1="0%" x2="100%" y2="0%">
+          <linearGradient id="mood-arc" x1="0%" y1="0%" x2="100%" y2="0%">
             <stop offset="0%" stopColor="#fbbf24" />
             <stop offset="45%" stopColor="#f43f5e" />
             <stop offset="100%" stopColor="#a855f7" />
@@ -65,7 +65,7 @@ export function EmoMeter({ sadness, anger, nostalgia }: { sadness: number; anger
         <path
           d={arcPath(CX, CY, R, 0, Math.max(1, (shown / 100) * 180))}
           fill="none"
-          stroke="url(#emo-arc)"
+          stroke="url(#mood-arc)"
           strokeWidth={16}
           strokeLinecap="round"
           style={{ transition: "all 1.2s cubic-bezier(.3,1.2,.4,1)" }}
@@ -95,9 +95,11 @@ export function EmoMeter({ sadness, anger, nostalgia }: { sadness: number; anger
         <span className="text-base font-medium text-zinc-500"> / 100</span>
       </p>
       <p className="mt-1 text-lg font-bold bg-gradient-to-r from-amber-400 via-rose-500 to-purple-500 bg-clip-text text-transparent">
-        {rank.label}
+        {level.label}
       </p>
-      <p className="text-zinc-500 text-xs text-center mt-1 max-w-[240px]">{rank.blurb}</p>
+      <p className="text-zinc-500 text-xs text-center mt-1 max-w-[240px]">
+        Weighted blend of sadness, anger, and nostalgia across all tracks.
+      </p>
       <div className="flex gap-4 mt-4 text-xs text-zinc-400">
         <span><span className="inline-block w-2 h-2 rounded-full bg-rose-500 mr-1" />sad {(sadness * 100).toFixed(0)}%</span>
         <span><span className="inline-block w-2 h-2 rounded-full bg-orange-500 mr-1" />angry {(anger * 100).toFixed(0)}%</span>

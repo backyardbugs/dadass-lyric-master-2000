@@ -14,8 +14,8 @@ const geistMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "The Emo Almanac",
-  description: "Lyric analysis and generative tools for Emo / Pop-Punk",
+  title: "Dad Ass Lyric Analyzer 3000",
+  description: "Lyric analysis and writing tools for any genre",
 };
 
 export default function RootLayout({

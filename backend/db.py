@@ -1,5 +1,5 @@
 """
-SQLite schema and helpers for The Emo Almanac.
+SQLite schema and helpers for Dad Ass Lyric Analyzer 3000.
 Database file: data/emo_almanac.db
 """
 from __future__ import annotations

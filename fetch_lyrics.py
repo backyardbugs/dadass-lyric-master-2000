@@ -1,5 +1,5 @@
 """
-fetch_lyrics.py — The Emo Almanac Data Pipeline (Phase 1)
+fetch_lyrics.py — Dad Ass Lyric Analyzer 3000 Data Pipeline (Phase 1)
 
 Authenticates with Spotify (playlist tracklist) and Genius (lyrics),
 then saves raw track + lyrics data to a JSON file for analysis.

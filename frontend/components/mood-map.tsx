@@ -76,10 +76,10 @@ export function MoodMap({ tracks }: { tracks: HeatmapTrack[] }) {
           </ScatterChart>
         </ResponsiveContainer>
       </div>
-      <span className="absolute left-12 top-2 text-[10px] uppercase tracking-widest text-orange-400/70">mad, not sad</span>
-      <span className="absolute right-4 top-2 text-[10px] uppercase tracking-widest text-rose-400/80">sad AND mad</span>
-      <span className="absolute left-12 bottom-10 text-[10px] uppercase tracking-widest text-zinc-500">suspiciously fine</span>
-      <span className="absolute right-4 bottom-10 text-[10px] uppercase tracking-widest text-rose-300/70">pure heartbreak</span>
+      <span className="absolute left-12 top-2 text-[10px] uppercase tracking-widest text-orange-400/70">high anger</span>
+      <span className="absolute right-4 top-2 text-[10px] uppercase tracking-widest text-rose-400/80">sad &amp; angry</span>
+      <span className="absolute left-12 bottom-10 text-[10px] uppercase tracking-widest text-zinc-500">low intensity</span>
+      <span className="absolute right-4 bottom-10 text-[10px] uppercase tracking-widest text-rose-300/70">high sadness</span>
     </div>
   );
 }

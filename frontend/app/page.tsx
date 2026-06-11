@@ -139,8 +139,8 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-zinc-950 text-zinc-100 p-6">
       <div className="max-w-2xl mx-auto space-y-8">
         <header className="text-center">
-          <h1 className="text-3xl font-bold tracking-tight">The Emo Almanac</h1>
-          <p className="text-zinc-400 mt-1">Lyric analysis & generative tools for Emo / Pop-Punk</p>
+          <h1 className="text-3xl font-bold tracking-tight">Dad Ass Lyric Analyzer 3000</h1>
+          <p className="text-zinc-400 mt-1">Lyric analysis & writing tools for any genre</p>
         </header>
 
         <Card className="bg-zinc-900 border-zinc-800">

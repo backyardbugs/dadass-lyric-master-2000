@@ -1,5 +1,5 @@
 """
-FastAPI app for The Emo Almanac.
+FastAPI app for Dad Ass Lyric Analyzer 3000.
 Run: uvicorn backend.main:app --reload
 """
 from __future__ import annotations
@@ -27,7 +27,7 @@ from backend.analyze import tokenize_lyrics, top_n_words, build_word_contexts
 from backend.nlp import sentiment_scores, top_n_by_pos, run_lda
 from backend import db
 
-app = FastAPI(title="The Emo Almanac API", version="0.1.0")
+app = FastAPI(title="Dad Ass Lyric Analyzer 3000 API", version="0.1.0")
 
 import os
 import re
@@ -99,7 +99,7 @@ def _get_spotify_oauth():
 def api_auth_spotify():
     """Redirect user to Spotify to authorize playlist access."""
     oauth = _get_spotify_oauth()
-    auth_url = oauth.get_authorize_url(state="emo_almanac")
+    auth_url = oauth.get_authorize_url(state="lyric_analyzer")
     return RedirectResponse(url=auth_url)
 
 
