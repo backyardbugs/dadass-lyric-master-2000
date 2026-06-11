@@ -4,6 +4,7 @@ Database file: data/emo_almanac.db
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 from datetime import datetime
@@ -81,6 +82,15 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_word_freq_run ON word_frequency(run_id);
             CREATE INDEX IF NOT EXISTS idx_word_context_run_word ON word_context(run_id, word);
         """)
+        # Migrations for DBs created before these columns existed
+        for ddl in (
+            "ALTER TABLE track ADD COLUMN metrics_json TEXT",
+            "ALTER TABLE track ADD COLUMN release_year INTEGER",
+        ):
+            try:
+                conn.execute(ddl)
+            except sqlite3.OperationalError:
+                pass
         conn.commit()
     finally:
         conn.close()
@@ -110,8 +120,8 @@ def insert_tracks(playlist_pk: int, tracks: list[dict]) -> None:
         conn.execute("DELETE FROM track WHERE playlist_id = ?", (playlist_pk,))
         for t in tracks:
             conn.execute(
-                """INSERT INTO track (playlist_id, artist, title, spotify_id, raw_lyrics, cleaned_lyrics)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO track (playlist_id, artist, title, spotify_id, raw_lyrics, cleaned_lyrics, release_year)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (
                     playlist_pk,
                     t["artist"],
@@ -119,6 +129,7 @@ def insert_tracks(playlist_pk: int, tracks: list[dict]) -> None:
                     t.get("spotify_id"),
                     t.get("raw_lyrics") or t.get("lyrics"),
                     t.get("cleaned_lyrics"),
+                    t.get("release_year"),
                 ),
             )
         conn.commit()
@@ -147,23 +158,28 @@ def get_tracks(playlist_pk: int | None = None) -> list[dict]:
         if playlist_pk is None:
             return []
         rows = conn.execute(
-            "SELECT id, artist, title, raw_lyrics, cleaned_lyrics, sentiment_sadness, sentiment_anger, sentiment_nostalgia FROM track WHERE playlist_id = ? ORDER BY id",
+            "SELECT id, artist, title, raw_lyrics, cleaned_lyrics, metrics_json, release_year FROM track WHERE playlist_id = ? ORDER BY id",
             (playlist_pk,),
         ).fetchall()
-        return [
-            {
+        out = []
+        for r in rows:
+            metrics = {}
+            if r["metrics_json"]:
+                try:
+                    metrics = json.loads(r["metrics_json"])
+                except (ValueError, TypeError):
+                    metrics = {}
+            out.append({
                 "id": r["id"],
                 "artist": r["artist"],
                 "title": r["title"],
                 "raw_lyrics": r["raw_lyrics"],
                 "cleaned_lyrics": r["cleaned_lyrics"],
                 "lyrics": r["cleaned_lyrics"] or r["raw_lyrics"],
-                "sentiment_sadness": r["sentiment_sadness"],
-                "sentiment_anger": r["sentiment_anger"],
-                "sentiment_nostalgia": r["sentiment_nostalgia"],
-            }
-            for r in rows
-        ]
+                "metrics": metrics,
+                "release_year": r["release_year"],
+            })
+        return out
     finally:
         conn.close()
 
@@ -265,12 +281,12 @@ def get_latest_run_id(playlist_pk: int | None = None) -> int | None:
         conn.close()
 
 
-def update_track_sentiment(track_id: int, sadness: float, anger: float, nostalgia: float) -> None:
+def update_track_metrics(track_id: int, metrics: dict) -> None:
     conn = get_connection()
     try:
         conn.execute(
-            "UPDATE track SET sentiment_sadness=?, sentiment_anger=?, sentiment_nostalgia=? WHERE id=?",
-            (sadness, anger, nostalgia, track_id),
+            "UPDATE track SET metrics_json=? WHERE id=?",
+            (json.dumps(metrics), track_id),
         )
         conn.commit()
     finally:

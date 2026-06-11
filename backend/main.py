@@ -24,7 +24,15 @@ from spotipy import Spotify
 from backend.cleaner import clean_lyrics
 from backend.fetch import _TokenAuth, extract_spotify_ref, fetch_source
 from backend.analyze import tokenize_lyrics, top_n_words, build_word_contexts
-from backend.nlp import sentiment_scores, top_n_by_pos, run_lda
+from backend.nlp import (
+    corpus_hooks,
+    corpus_rhyme_pairs,
+    pov_profile,
+    run_topics,
+    signature_words,
+    top_n_by_pos,
+    track_metrics,
+)
 from backend import db
 
 app = FastAPI(title="Dad Ass Lyric Analyzer 3000 API", version="0.1.0")
@@ -288,8 +296,8 @@ def api_analyze():
     try:
         for t in tracks:
             raw = t.get("cleaned_lyrics") or t.get("raw_lyrics") or ""
-            sad, ang, nos = sentiment_scores(raw)
-            db.update_track_sentiment(t["id"], sad, ang, nos)
+            metrics = track_metrics(raw)
+            db.update_track_metrics(t["id"], metrics)
     except Exception:
         pass
 
@@ -301,7 +309,7 @@ def api_analyze():
         pass
 
     try:
-        topic_labels, per_track_weights, doc_track_ids = run_lda(tracks, text_key=text_key, n_topics=6)
+        topic_labels, per_track_weights, doc_track_ids = run_topics(tracks, text_key=text_key, n_topics=6)
         if topic_labels and per_track_weights and doc_track_ids:
             topic_ids = db.insert_topics(run_id, topic_labels)
             for topic_idx, topic_id in enumerate(topic_ids):
@@ -375,20 +383,23 @@ def api_top_words(pos: str | None = None, limit: int = 100):
 
 @app.get("/api/sentiment/heatmap")
 def api_sentiment_heatmap():
-    """Return tracks with sadness (and anger, nostalgia) for heatmap. Order by track index."""
+    """Per-track tone metrics in track order: valence (-1..1, dark to bright),
+    intensity (0..1, how emotionally charged), volatility (line-to-line mood swing)."""
     playlist_pk = db.get_latest_playlist_id()
     if playlist_pk is None:
         return {"tracks": []}
     tracks = db.get_tracks(playlist_pk)
     out = []
     for i, t in enumerate(tracks):
+        m = t.get("metrics") or {}
         out.append({
             "track_index": i,
             "title": t["title"],
             "artist": t["artist"],
-            "sadness": t.get("sentiment_sadness") if t.get("sentiment_sadness") is not None else 0,
-            "anger": t.get("sentiment_anger") if t.get("sentiment_anger") is not None else 0,
-            "nostalgia": t.get("sentiment_nostalgia") if t.get("sentiment_nostalgia") is not None else 0,
+            "valence": m.get("valence", 0),
+            "intensity": m.get("intensity", 0),
+            "volatility": m.get("volatility", 0),
+            "release_year": t.get("release_year"),
         })
     return {"tracks": out}
 
@@ -449,12 +460,12 @@ def api_topics():
         conn.close()
 
 
-_WORD_RE = re.compile(r"[a-zà-ÿ']+")
+_WORD_RE = re.compile(r"[a-z][a-z']*")
 
 
 @app.get("/api/stats")
 def api_stats():
-    """Corpus stats and superlatives for the latest dataset (for the Explore page)."""
+    """Corpus stats and standout tracks for the latest dataset (for the Explore page)."""
     playlist_pk = db.get_latest_playlist_id()
     if playlist_pk is None:
         return {"has_data": False}
@@ -469,18 +480,22 @@ def api_stats():
     for t in tracks:
         text = (t.get("cleaned_lyrics") or t.get("raw_lyrics") or "").lower()
         words = _WORD_RE.findall(text)
-        n, u = len(words), len(set(words))
-        total_words += n
+        total_words += len(words)
         vocab.update(words)
+        m = t.get("metrics") or {}
+        if not m:
+            continue
         per_track.append({
             "title": t["title"],
             "artist": t["artist"],
-            "words": n,
-            "unique": u,
-            "diversity": (u / n) if n else 0.0,
-            "sadness": t.get("sentiment_sadness") or 0.0,
-            "anger": t.get("sentiment_anger") or 0.0,
-            "nostalgia": t.get("sentiment_nostalgia") or 0.0,
+            "words": m.get("words", len(words)),
+            "unique": m.get("unique_words", 0),
+            "diversity": m.get("diversity", 0.0),
+            "valence": m.get("valence", 0.0),
+            "intensity": m.get("intensity", 0.0),
+            "volatility": m.get("volatility", 0.0),
+            "repetition": m.get("repetition", 0.0),
+            "rhyme_density": m.get("rhyme_density", 0.0),
         })
 
     scored = [p for p in per_track if p["words"] > 0]
@@ -492,26 +507,89 @@ def api_stats():
         p = sorted(items, key=lambda x: x[key], reverse=reverse)[0]
         return {"title": p["title"], "artist": p["artist"], "value": round(p[key], 3)}
 
-    n_tracks = len(per_track)
+    n = len(scored)
     return {
         "has_data": True,
         "name": (info or {}).get("name") or None,
-        "track_count": n_tracks,
+        "track_count": len(tracks),
+        "analyzed_count": n,
         "total_words": total_words,
         "unique_words": len(vocab),
-        "avg_words_per_track": round(total_words / n_tracks, 1) if n_tracks else 0,
-        "avg_sadness": round(sum(p["sadness"] for p in per_track) / n_tracks, 4) if n_tracks else 0,
-        "avg_anger": round(sum(p["anger"] for p in per_track) / n_tracks, 4) if n_tracks else 0,
-        "avg_nostalgia": round(sum(p["nostalgia"] for p in per_track) / n_tracks, 4) if n_tracks else 0,
+        "avg_words_per_track": round(total_words / len(tracks), 1) if tracks else 0,
+        "avg_valence": round(sum(p["valence"] for p in scored) / n, 4) if n else 0,
+        "avg_intensity": round(sum(p["intensity"] for p in scored) / n, 4) if n else 0,
+        "avg_volatility": round(sum(p["volatility"] for p in scored) / n, 4) if n else 0,
+        "avg_rhyme_density": round(sum(p["rhyme_density"] for p in scored) / n, 4) if n else 0,
+        "avg_repetition": round(sum(p["repetition"] for p in scored) / n, 4) if n else 0,
         "superlatives": {
-            "saddest": _pick(scored, "sadness"),
-            "angriest": _pick(scored, "anger"),
-            "most_nostalgic": _pick(scored, "nostalgia"),
+            "darkest": _pick(scored, "valence", reverse=False),
+            "brightest": _pick(scored, "valence"),
+            "most_volatile": _pick(scored, "volatility"),
             "biggest_vocabulary": _pick(substantial, "unique"),
-            "most_repetitive": _pick(substantial, "diversity", reverse=False),
-            "wordiest": _pick(scored, "words"),
+            "most_repetitive": _pick(substantial, "repetition"),
+            "densest_rhymes": _pick(substantial, "rhyme_density"),
         },
     }
+
+
+_craft_cache: dict[int, dict] = {}
+
+
+@app.get("/api/craft")
+def api_craft():
+    """Craft analysis of the corpus: signature words (vs general English),
+    most repeated lines (hooks), most-used rhyme pairs, and point-of-view mix."""
+    run_id = db.get_latest_run_id()
+    playlist_pk = db.get_latest_playlist_id()
+    if playlist_pk is None:
+        return {"has_data": False}
+    cache_key = run_id or -1
+    if cache_key in _craft_cache:
+        return _craft_cache[cache_key]
+    tracks = db.get_tracks(playlist_pk)
+    if not tracks:
+        return {"has_data": False}
+    result = {
+        "has_data": True,
+        "signature_words": signature_words(tracks),
+        "hooks": corpus_hooks(tracks),
+        "rhyme_pairs": corpus_rhyme_pairs(tracks),
+        "pov": pov_profile(tracks),
+    }
+    _craft_cache.clear()
+    _craft_cache[cache_key] = result
+    return result
+
+
+@app.get("/api/trends")
+def api_trends():
+    """Per-year averages (valence, lexical diversity, words per track) for
+    datasets with release years — e.g. artist discographies."""
+    playlist_pk = db.get_latest_playlist_id()
+    if playlist_pk is None:
+        return {"years": []}
+    tracks = db.get_tracks(playlist_pk)
+    by_year: dict[int, list[dict]] = {}
+    for t in tracks:
+        y = t.get("release_year")
+        m = t.get("metrics") or {}
+        if not y or not m:
+            continue
+        by_year.setdefault(y, []).append(m)
+    years = []
+    for y in sorted(by_year):
+        ms = by_year[y]
+        n = len(ms)
+        years.append({
+            "year": y,
+            "tracks": n,
+            "valence": round(sum(m.get("valence", 0) for m in ms) / n, 4),
+            "intensity": round(sum(m.get("intensity", 0) for m in ms) / n, 4),
+            "diversity": round(sum(m.get("diversity", 0) for m in ms) / n, 4),
+            "words_per_track": round(sum(m.get("words", 0) for m in ms) / n, 1),
+            "rhyme_density": round(sum(m.get("rhyme_density", 0) for m in ms) / n, 4),
+        })
+    return {"years": years}
 
 
 # --- Lyric Lab: suggestions and cliche check ---

@@ -55,6 +55,13 @@ def extract_spotify_ref(url: str) -> tuple[str, str] | None:
     return None
 
 
+def _release_year(release_date: str | None) -> int | None:
+    if not release_date:
+        return None
+    m = re.match(r"(\d{4})", release_date)
+    return int(m.group(1)) if m else None
+
+
 def _spotify_client(access_token: str | None = None) -> Spotify:
     """Spotify client from a user OAuth token, or app client credentials."""
     if access_token:
@@ -90,6 +97,7 @@ def get_spotify_tracks(playlist_id: str, access_token: str | None = None) -> lis
                 "spotify_id": track.get("id"),
                 "artist": artist_name,
                 "title": track.get("name", "").strip(),
+                "release_year": _release_year((track.get("album") or {}).get("release_date")),
             })
         offset += len(items)
         if len(items) < limit:
@@ -119,6 +127,7 @@ def get_album_data(album_id: str, access_token: str | None = None) -> tuple[str,
     album = sp.album(album_id)
     album_artist = ", ".join(a.get("name", "") for a in album.get("artists") or []) or "Unknown"
     name = f"{album_artist} — {album.get('name', '')}".strip(" —")
+    year = _release_year(album.get("release_date"))
     tracks = []
     page = album.get("tracks") or {}
     while True:
@@ -130,6 +139,7 @@ def get_album_data(album_id: str, access_token: str | None = None) -> tuple[str,
                 "spotify_id": tr.get("id"),
                 "artist": artist,
                 "title": tr["name"].strip(),
+                "release_year": year,
             })
         if not page.get("next"):
             break
@@ -153,19 +163,19 @@ def get_artist_data(
     artist = sp.artist(artist_id)
     name = artist.get("name") or "Unknown"
 
-    album_ids = []
+    albums: list[tuple[str, int | None]] = []
     # Spotify rejects limits above 10 on this endpoint for newer apps ("Invalid limit")
     page = sp.artist_albums(artist_id, include_groups="album,single", limit=10)
     while page:
         for a in page.get("items") or []:
             if a and a.get("id"):
-                album_ids.append(a["id"])
+                albums.append((a["id"], _release_year(a.get("release_date"))))
         page = sp.next(page) if page.get("next") else None
 
     tracks: list[dict] = []
     seen: set[str] = set()
     # Fetch per album: the batch /v1/albums?ids= endpoint is 403 Forbidden for newer apps.
-    for album_id in album_ids:
+    for album_id, year in albums:
         if len(tracks) >= max_tracks:
             break
         try:
@@ -186,6 +196,7 @@ def get_artist_data(
                     "spotify_id": tr.get("id"),
                     "artist": name,
                     "title": tr["name"].strip(),
+                    "release_year": year,
                 })
             page = sp.next(page) if page.get("next") else None
     return name, tracks[:max_tracks]

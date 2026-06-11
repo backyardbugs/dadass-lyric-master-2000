@@ -134,10 +134,44 @@ export async function getTopWords(pos?: string, limit = 100): Promise<{ top_word
   return fetchApi(`/api/top-words${q}`);
 }
 
-export type HeatmapTrack = { track_index: number; title: string; artist: string; sadness: number; anger: number; nostalgia: number };
+export type HeatmapTrack = {
+  track_index: number;
+  title: string;
+  artist: string;
+  valence: number;
+  intensity: number;
+  volatility: number;
+  release_year: number | null;
+};
 
 export async function getSentimentHeatmap(): Promise<{ tracks: HeatmapTrack[] }> {
   return fetchApi("/api/sentiment/heatmap");
+}
+
+export type Craft = {
+  has_data: boolean;
+  signature_words?: { word: string; count: number; songs: number; ratio: number; score: number }[];
+  hooks?: { line: string; count: number; songs: number; example: string }[];
+  rhyme_pairs?: { a: string; b: string; count: number }[];
+  pov?: { i: number; you: number; we: number; they: number; total: number };
+};
+
+export async function getCraft(): Promise<Craft> {
+  return fetchApi("/api/craft");
+}
+
+export type TrendYear = {
+  year: number;
+  tracks: number;
+  valence: number;
+  intensity: number;
+  diversity: number;
+  words_per_track: number;
+  rhyme_density: number;
+};
+
+export async function getTrends(): Promise<{ years: TrendYear[] }> {
+  return fetchApi("/api/trends");
 }
 
 export async function getWordContext(word: string): Promise<{ word: string; contexts: { line: string; artist: string; title: string }[] }> {
@@ -161,19 +195,22 @@ export type Stats = {
   has_data: boolean;
   name?: string | null;
   track_count?: number;
+  analyzed_count?: number;
   total_words?: number;
   unique_words?: number;
   avg_words_per_track?: number;
-  avg_sadness?: number;
-  avg_anger?: number;
-  avg_nostalgia?: number;
+  avg_valence?: number;
+  avg_intensity?: number;
+  avg_volatility?: number;
+  avg_rhyme_density?: number;
+  avg_repetition?: number;
   superlatives?: {
-    saddest: Superlative;
-    angriest: Superlative;
-    most_nostalgic: Superlative;
+    darkest: Superlative;
+    brightest: Superlative;
+    most_volatile: Superlative;
     biggest_vocabulary: Superlative;
     most_repetitive: Superlative;
-    wordiest: Superlative;
+    densest_rhymes: Superlative;
   };
 };
 

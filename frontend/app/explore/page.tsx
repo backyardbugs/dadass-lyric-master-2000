@@ -17,14 +17,20 @@ import { MoodMap } from "@/components/mood-map";
 import { MoodFlow } from "@/components/mood-flow";
 import { EmotionGrid } from "@/components/emotion-grid";
 import { TopicBubbles } from "@/components/topic-bubbles";
+import { SignatureWords, Hooks, RhymePairs, PovProfile } from "@/components/craft-panels";
+import { TrendsChart } from "@/components/trends-chart";
 import {
   getTopWords,
   getSentimentHeatmap,
   getWordContext,
   getStats,
   getTopics,
+  getCraft,
+  getTrends,
   type Stats,
   type Topic,
+  type Craft,
+  type TrendYear,
   type HeatmapTrack,
 } from "@/lib/api";
 
@@ -33,6 +39,8 @@ export default function ExplorePage() {
   const [heatmapTracks, setHeatmapTracks] = useState<HeatmapTrack[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [topics, setTopics] = useState<Topic[]>([]);
+  const [craft, setCraft] = useState<Craft | null>(null);
+  const [trendYears, setTrendYears] = useState<TrendYear[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedWord, setSelectedWord] = useState<string | null>(null);
   const [contexts, setContexts] = useState<{ line: string; artist: string; title: string }[]>([]);
@@ -41,16 +49,20 @@ export default function ExplorePage() {
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const [wordsRes, heatRes, statsRes, topicsRes] = await Promise.allSettled([
+      const [wordsRes, heatRes, statsRes, topicsRes, craftRes, trendsRes] = await Promise.allSettled([
         getTopWords(undefined, 100),
         getSentimentHeatmap(),
         getStats(),
         getTopics(),
+        getCraft(),
+        getTrends(),
       ]);
       setTopWords(wordsRes.status === "fulfilled" ? wordsRes.value.top_words : []);
       setHeatmapTracks(heatRes.status === "fulfilled" ? heatRes.value.tracks : []);
       setStats(statsRes.status === "fulfilled" && statsRes.value.has_data ? statsRes.value : null);
       setTopics(topicsRes.status === "fulfilled" ? topicsRes.value.topics : []);
+      setCraft(craftRes.status === "fulfilled" && craftRes.value.has_data ? craftRes.value : null);
+      setTrendYears(trendsRes.status === "fulfilled" ? trendsRes.value.years : []);
       setLoading(false);
     })();
   }, []);
@@ -97,15 +109,15 @@ export default function ExplorePage() {
             <div className="grid lg:grid-cols-5 gap-6">
               <Card className="bg-zinc-900 border-zinc-800 lg:col-span-2">
                 <CardHeader>
-                  <CardTitle>Mood meter</CardTitle>
-                  <CardDescription>Overall emotional intensity of this dataset.</CardDescription>
+                  <CardTitle>Overall tone</CardTitle>
+                  <CardDescription>How dark or bright the writing reads.</CardDescription>
                 </CardHeader>
                 <CardContent>
                   {stats ? (
                     <MoodMeter
-                      sadness={stats.avg_sadness ?? 0}
-                      anger={stats.avg_anger ?? 0}
-                      nostalgia={stats.avg_nostalgia ?? 0}
+                      valence={stats.avg_valence ?? 0}
+                      intensity={stats.avg_intensity ?? 0}
+                      volatility={stats.avg_volatility ?? 0}
                     />
                   ) : (
                     <p className="text-zinc-500 text-sm">Run analysis first.</p>
@@ -138,9 +150,56 @@ export default function ExplorePage() {
 
             <Card className="bg-zinc-900 border-zinc-800">
               <CardHeader>
+                <CardTitle>Signature words</CardTitle>
+                <CardDescription>
+                  The words this writer returns to far more than everyday English does — their fingerprint.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {craft ? <SignatureWords craft={craft} onWordClick={onWordClick} /> : <p className="text-zinc-500 text-sm">Run analysis first.</p>}
+              </CardContent>
+            </Card>
+
+            <div className="grid lg:grid-cols-2 gap-6">
+              <Card className="bg-zinc-900 border-zinc-800">
+                <CardHeader>
+                  <CardTitle>Hooks &amp; repetition</CardTitle>
+                  <CardDescription>The most repeated lines in the dataset.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {craft ? <Hooks craft={craft} /> : <p className="text-zinc-500 text-sm">Run analysis first.</p>}
+                </CardContent>
+              </Card>
+
+              <div className="space-y-6">
+                <Card className="bg-zinc-900 border-zinc-800">
+                  <CardHeader>
+                    <CardTitle>Favorite rhymes</CardTitle>
+                    <CardDescription>End-rhyme pairs they reach for most.</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {craft ? <RhymePairs craft={craft} /> : <p className="text-zinc-500 text-sm">Run analysis first.</p>}
+                  </CardContent>
+                </Card>
+
+                <Card className="bg-zinc-900 border-zinc-800">
+                  <CardHeader>
+                    <CardTitle>Point of view</CardTitle>
+                    <CardDescription>Who the songs speak as, and to.</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {craft ? <PovProfile craft={craft} /> : <p className="text-zinc-500 text-sm">Run analysis first.</p>}
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+
+            <Card className="bg-zinc-900 border-zinc-800">
+              <CardHeader>
                 <CardTitle>Mood map</CardTitle>
                 <CardDescription>
-                  Every track plotted by sadness and anger. Bigger bubble = more nostalgia. Hover for details.
+                  Each track plotted by valence (dark ↔ bright) and emotional intensity. Bubble size =
+                  mood volatility.
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -152,7 +211,7 @@ export default function ExplorePage() {
               <Card className="bg-zinc-900 border-zinc-800">
                 <CardHeader>
                   <CardTitle>Emotional arc</CardTitle>
-                  <CardDescription>How each emotion rises and falls across the tracklist.</CardDescription>
+                  <CardDescription>Valence and intensity across the tracklist.</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <MoodFlow tracks={heatmapTracks} />
@@ -161,8 +220,8 @@ export default function ExplorePage() {
 
               <Card className="bg-zinc-900 border-zinc-800">
                 <CardHeader>
-                  <CardTitle>Emotion heatmap</CardTitle>
-                  <CardDescription>All three emotions for every track.</CardDescription>
+                  <CardTitle>Tone heatmap</CardTitle>
+                  <CardDescription>Valence, intensity, and volatility for every track.</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <EmotionGrid tracks={heatmapTracks} />
@@ -172,13 +231,26 @@ export default function ExplorePage() {
 
             <Card className="bg-zinc-900 border-zinc-800">
               <CardHeader>
-                <CardTitle>Topics</CardTitle>
+                <CardTitle>Themes</CardTitle>
                 <CardDescription>
-                  Themes found by the topic model, with the tracks that match each one most strongly.
+                  Word groups that travel together across songs (TF-IDF + NMF), with the tracks that
+                  match each one most strongly.
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 <TopicBubbles topics={topics} />
+              </CardContent>
+            </Card>
+
+            <Card className="bg-zinc-900 border-zinc-800">
+              <CardHeader>
+                <CardTitle>Over the years</CardTitle>
+                <CardDescription>
+                  How the writing changed by release year: tone, vocabulary range, rhyme habits.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <TrendsChart years={trendYears} />
               </CardContent>
             </Card>
           </>

@@ -2,23 +2,16 @@
 
 import { useEffect, useState } from "react";
 
-/** Blend the three emotions into a 0–100 intensity score. Raw averages live
- * around 0–0.25, so scale up so a typical dataset lands mid-dial. */
-export function intensityScore(sadness: number, anger: number, nostalgia: number): number {
-  const blended = sadness * 0.55 + anger * 0.2 + nostalgia * 0.25;
-  return Math.min(100, Math.round(blended * 450));
-}
-
 const LEVELS: { min: number; label: string }[] = [
-  { min: 80, label: "Very heavy" },
-  { min: 60, label: "Heavy" },
-  { min: 40, label: "Moderate" },
-  { min: 20, label: "Mild" },
-  { min: 0, label: "Light" },
+  { min: 0.15, label: "Bright" },
+  { min: 0.05, label: "Warm" },
+  { min: -0.05, label: "Mixed" },
+  { min: -0.15, label: "Somber" },
+  { min: -1, label: "Dark" },
 ];
 
-export function levelFor(score: number) {
-  return LEVELS.find((l) => score >= l.min) ?? LEVELS[LEVELS.length - 1];
+function levelFor(valence: number) {
+  return LEVELS.find((l) => valence >= l.min) ?? LEVELS[LEVELS.length - 1];
 }
 
 function polar(cx: number, cy: number, r: number, deg: number) {
@@ -33,48 +26,51 @@ function arcPath(cx: number, cy: number, r: number, startDeg: number, endDeg: nu
   return `M ${s.x.toFixed(2)} ${s.y.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${e.x.toFixed(2)} ${e.y.toFixed(2)}`;
 }
 
-export function MoodMeter({ sadness, anger, nostalgia }: { sadness: number; anger: number; nostalgia: number }) {
-  const score = intensityScore(sadness, anger, nostalgia);
-  const level = levelFor(score);
-  // Animate the needle sweeping from 0 on mount
-  const [shown, setShown] = useState(0);
+/** Valence gauge: -1 (dark) .. +1 (bright). Typical lyric corpora sit within
+ * ±0.3, so the dial spans -0.4..0.4 for readability. */
+export function MoodMeter({
+  valence,
+  intensity,
+  volatility,
+}: {
+  valence: number;
+  intensity: number;
+  volatility: number;
+}) {
+  const SPAN = 0.4;
+  const frac = Math.max(0, Math.min(1, (valence + SPAN) / (2 * SPAN)));
+  const level = levelFor(valence);
+
+  const [shown, setShown] = useState(0.5);
   useEffect(() => {
-    const t = setTimeout(() => setShown(score), 150);
+    const t = setTimeout(() => setShown(frac), 150);
     return () => clearTimeout(t);
-  }, [score]);
+  }, [frac]);
 
   const W = 260;
   const H = 150;
   const CX = W / 2;
   const CY = 130;
   const R = 100;
-  const needleDeg = (shown / 100) * 180;
+  const needleDeg = shown * 180;
   const tip = polar(CX, CY, R - 18, needleDeg);
 
   return (
     <div className="flex flex-col items-center">
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full max-w-[280px]">
         <defs>
-          <linearGradient id="mood-arc" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="#fbbf24" />
-            <stop offset="45%" stopColor="#f43f5e" />
-            <stop offset="100%" stopColor="#a855f7" />
+          <linearGradient id="tone-arc" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="#6366f1" />
+            <stop offset="50%" stopColor="#a1a1aa" />
+            <stop offset="100%" stopColor="#fbbf24" />
           </linearGradient>
         </defs>
-        <path d={arcPath(CX, CY, R, 0, 180)} fill="none" stroke="#27272a" strokeWidth={16} strokeLinecap="round" />
-        <path
-          d={arcPath(CX, CY, R, 0, Math.max(1, (shown / 100) * 180))}
-          fill="none"
-          stroke="url(#mood-arc)"
-          strokeWidth={16}
-          strokeLinecap="round"
-          style={{ transition: "all 1.2s cubic-bezier(.3,1.2,.4,1)" }}
-        />
-        {[0, 25, 50, 75, 100].map((tick) => {
-          const p1 = polar(CX, CY, R + 12, (tick / 100) * 180);
+        <path d={arcPath(CX, CY, R, 0, 180)} fill="none" stroke="url(#tone-arc)" strokeWidth={16} strokeLinecap="round" opacity={0.85} />
+        {(["dark", "neutral", "bright"] as const).map((t, i) => {
+          const p = polar(CX, CY, R + 14, i * 90);
           return (
-            <text key={tick} x={p1.x} y={p1.y} fill="#52525b" fontSize={9} textAnchor="middle">
-              {tick}
+            <text key={t} x={p.x} y={p.y} fill="#52525b" fontSize={9} textAnchor="middle">
+              {t}
             </text>
           );
         })}
@@ -91,20 +87,26 @@ export function MoodMeter({ sadness, anger, nostalgia }: { sadness: number; ange
         <circle cx={CX} cy={CY} r={6} fill="#fafafa" />
       </svg>
       <p className="text-4xl font-black tracking-tight -mt-2">
-        {score}
-        <span className="text-base font-medium text-zinc-500"> / 100</span>
+        {valence >= 0 ? "+" : ""}
+        {valence.toFixed(2)}
       </p>
-      <p className="mt-1 text-lg font-bold bg-gradient-to-r from-amber-400 via-rose-500 to-purple-500 bg-clip-text text-transparent">
+      <p className="mt-1 text-lg font-bold bg-gradient-to-r from-indigo-400 via-zinc-300 to-amber-400 bg-clip-text text-transparent">
         {level.label}
       </p>
-      <p className="text-zinc-500 text-xs text-center mt-1 max-w-[240px]">
-        Weighted blend of sadness, anger, and nostalgia across all tracks.
-      </p>
-      <div className="flex gap-4 mt-4 text-xs text-zinc-400">
-        <span><span className="inline-block w-2 h-2 rounded-full bg-rose-500 mr-1" />sad {(sadness * 100).toFixed(0)}%</span>
-        <span><span className="inline-block w-2 h-2 rounded-full bg-orange-500 mr-1" />angry {(anger * 100).toFixed(0)}%</span>
-        <span><span className="inline-block w-2 h-2 rounded-full bg-indigo-400 mr-1" />nostalgic {(nostalgia * 100).toFixed(0)}%</span>
+      <div className="grid grid-cols-2 gap-3 mt-4 w-full max-w-[260px] text-center">
+        <div className="rounded-lg border border-zinc-800 p-2">
+          <p className="text-lg font-bold">{(intensity * 100).toFixed(0)}%</p>
+          <p className="text-[11px] text-zinc-500">emotional intensity</p>
+        </div>
+        <div className="rounded-lg border border-zinc-800 p-2">
+          <p className="text-lg font-bold">{(volatility * 100).toFixed(0)}%</p>
+          <p className="text-[11px] text-zinc-500">mood volatility</p>
+        </div>
       </div>
+      <p className="text-zinc-600 text-[11px] text-center mt-3 max-w-[250px]">
+        Each line is scored with VADER sentiment (−1 to +1). Valence is the average, intensity
+        the average strength, volatility the line-to-line swing.
+      </p>
     </div>
   );
 }
