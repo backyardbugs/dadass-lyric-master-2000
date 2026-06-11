@@ -30,6 +30,7 @@ from backend.nlp import (
     pov_profile,
     run_topics,
     signature_words,
+    song_structure,
     top_n_by_pos,
     track_metrics,
 )
@@ -558,6 +559,103 @@ def api_craft():
     }
     _craft_cache.clear()
     _craft_cache[cache_key] = result
+    return result
+
+
+@app.get("/api/tracks")
+def api_tracks():
+    """All tracks in the latest dataset with per-track metrics and structure summary."""
+    playlist_pk = db.get_latest_playlist_id()
+    if playlist_pk is None:
+        return {"tracks": []}
+    tracks = db.get_tracks(playlist_pk)
+    out = []
+    for i, t in enumerate(tracks):
+        m = t.get("metrics") or {}
+        has_lyrics = bool(t.get("cleaned_lyrics") or t.get("raw_lyrics"))
+        st = song_structure(t.get("raw_lyrics"), t.get("cleaned_lyrics")) if has_lyrics else {}
+        out.append({
+            "id": t["id"],
+            "index": i,
+            "title": t["title"],
+            "artist": t["artist"],
+            "release_year": t.get("release_year"),
+            "has_lyrics": has_lyrics,
+            "words": m.get("words", 0),
+            "unique_words": m.get("unique_words", 0),
+            "valence": m.get("valence", 0),
+            "intensity": m.get("intensity", 0),
+            "volatility": m.get("volatility", 0),
+            "rhyme_density": m.get("rhyme_density", 0),
+            "repetition": m.get("repetition", 0),
+            "structure": st.get("summary", ""),
+            "chorus_share": st.get("chorus_share", 0),
+        })
+    return {"tracks": out}
+
+
+@app.get("/api/track/{track_id}")
+def api_track(track_id: int):
+    """One track: metrics plus lyrics split into labeled sections."""
+    playlist_pk = db.get_latest_playlist_id()
+    if playlist_pk is None:
+        raise HTTPException(status_code=404, detail="No data.")
+    tracks = db.get_tracks(playlist_pk)
+    t = next((x for x in tracks if x["id"] == track_id), None)
+    if t is None:
+        raise HTTPException(status_code=404, detail="Track not found.")
+    st = song_structure(t.get("raw_lyrics"), t.get("cleaned_lyrics"))
+    return {
+        "id": t["id"],
+        "title": t["title"],
+        "artist": t["artist"],
+        "release_year": t.get("release_year"),
+        "metrics": t.get("metrics") or {},
+        "sections": st.get("sections", []),
+        "summary": st.get("summary", ""),
+        "chorus_share": st.get("chorus_share", 0),
+    }
+
+
+_word_stats_cache: dict[int, dict] = {}
+
+
+@app.get("/api/word-stats")
+def api_word_stats():
+    """Corpus stats for every word (for hover tooltips in the lyrics viewer):
+    count, number of songs it appears in, and usage ratio vs everyday English."""
+    import math
+
+    from wordfreq import zipf_frequency
+
+    playlist_pk = db.get_latest_playlist_id()
+    if playlist_pk is None:
+        return {"words": {}}
+    if playlist_pk in _word_stats_cache:
+        return _word_stats_cache[playlist_pk]
+    tracks = db.get_tracks(playlist_pk)
+    counts: dict[str, int] = {}
+    songs: dict[str, int] = {}
+    for t in tracks:
+        text = (t.get("cleaned_lyrics") or t.get("raw_lyrics") or "").lower()
+        toks = _WORD_RE.findall(text)
+        for w in toks:
+            counts[w] = counts.get(w, 0) + 1
+        for w in set(toks):
+            songs[w] = songs.get(w, 0) + 1
+    total = sum(counts.values()) or 1
+    words = {}
+    for w, c in counts.items():
+        corpus_zipf = math.log10(c / total * 1e9)
+        eng = zipf_frequency(w, "en") or 1.5
+        words[w] = {
+            "count": c,
+            "songs": songs.get(w, 0),
+            "ratio": round(10 ** (corpus_zipf - eng), 1),
+        }
+    result = {"words": words}
+    _word_stats_cache.clear()
+    _word_stats_cache[playlist_pk] = result
     return result
 
 

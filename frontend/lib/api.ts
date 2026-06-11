@@ -160,6 +160,61 @@ export async function getCraft(): Promise<Craft> {
   return fetchApi("/api/craft");
 }
 
+export type TrackSummary = {
+  id: number;
+  index: number;
+  title: string;
+  artist: string;
+  release_year: number | null;
+  has_lyrics: boolean;
+  words: number;
+  unique_words: number;
+  valence: number;
+  intensity: number;
+  volatility: number;
+  rhyme_density: number;
+  repetition: number;
+  structure: string;
+  chorus_share: number;
+};
+
+export async function getTracks(): Promise<{ tracks: TrackSummary[] }> {
+  return fetchApi("/api/tracks");
+}
+
+export type TrackSection = { label: string; lines: string[]; words: number };
+
+export type TrackDetail = {
+  id: number;
+  title: string;
+  artist: string;
+  release_year: number | null;
+  metrics: {
+    valence?: number;
+    intensity?: number;
+    volatility?: number;
+    words?: number;
+    unique_words?: number;
+    diversity?: number;
+    repetition?: number;
+    rhyme_density?: number;
+    words_per_line?: number;
+  };
+  sections: TrackSection[];
+  summary: string;
+  chorus_share: number;
+};
+
+export async function getTrack(id: number): Promise<TrackDetail> {
+  return fetchApi(`/api/track/${id}`);
+}
+
+export type WordStat = { count: number; songs: number; ratio: number };
+
+export async function getWordStats(): Promise<{ words: Record<string, WordStat> }> {
+  return fetchApi("/api/word-stats");
+}
+
 export type TrendYear = {
   year: number;
   tracks: number;

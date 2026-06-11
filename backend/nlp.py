@@ -247,6 +247,151 @@ def pov_profile(tracks: list[dict]) -> dict:
     }
 
 
+# ---------- Song structure ----------
+
+_SECTION_HEADER_RE = re.compile(r"^\s*\[([^\]]+)\]\s*$")
+
+_SECTION_CANON = [
+    ("pre-chorus", "Pre-Chorus"), ("pre chorus", "Pre-Chorus"),
+    ("chorus", "Chorus"), ("refrain", "Chorus"), ("hook", "Chorus"),
+    ("verse", "Verse"), ("bridge", "Bridge"), ("intro", "Intro"),
+    ("outro", "Outro"), ("interlude", "Interlude"),
+    ("instrumental", "Instrumental"), ("solo", "Solo"), ("breakdown", "Bridge"),
+]
+
+CHORUS_LABELS = {"Chorus"}
+
+
+def _canon_section(name: str) -> str | None:
+    n = name.lower()
+    for key, label in _SECTION_CANON:
+        if key in n:
+            return label
+    return None
+
+
+def _sections_from_repeated_runs(lines: list[str]) -> list[dict]:
+    """Chorus detection for lyrics without stanza breaks: the longest run of
+    2+ consecutive lines that repeats (non-overlapping) is the chorus."""
+    n = len(lines)
+    if n == 0:
+        return []
+    norm = [_norm_line(l) for l in lines]
+
+    found: tuple[int, list[int]] | None = None
+    for L in range(min(10, n // 2), 1, -1):
+        grams: dict[tuple, list[int]] = {}
+        for i in range(n - L + 1):
+            key = tuple(norm[i:i + L])
+            if not any(key):
+                continue
+            grams.setdefault(key, []).append(i)
+        candidates = []
+        for key, poss in grams.items():
+            picked: list[int] = []
+            last_end = -1
+            for p in poss:
+                if p > last_end:
+                    picked.append(p)
+                    last_end = p + L - 1
+            if len(picked) >= 2:
+                candidates.append(picked)
+        if candidates:
+            picked = max(candidates, key=lambda ps: (len(ps), -ps[0]))
+            found = (L, picked)
+            break
+
+    if not found:
+        return [{"label": "Song", "lines": lines}]
+
+    L, starts = found
+    chorus_ranges = [(s, s + L) for s in starts]
+    sections: list[dict] = []
+    pos = 0
+    n_choruses_seen = 0
+    for ci, (cs, ce) in enumerate(chorus_ranges):
+        if pos < cs:
+            gap = lines[pos:cs]
+            label = "Verse"
+            if n_choruses_seen >= 2 and ci == len(chorus_ranges) - 1:
+                label = "Bridge"
+            elif n_choruses_seen == 0 and len(gap) <= 2:
+                label = "Intro"
+            sections.append({"label": label, "lines": gap})
+        sections.append({"label": "Chorus", "lines": lines[cs:ce]})
+        n_choruses_seen += 1
+        pos = ce
+    if pos < n:
+        tail = lines[pos:]
+        sections.append({"label": "Outro" if len(tail) <= 2 else "Verse", "lines": tail})
+    return sections
+
+
+def song_structure(raw: str | None, cleaned: str | None) -> dict:
+    """Detect song sections.
+    Uses [Verse]/[Chorus] headers when the source (Genius) provides them;
+    otherwise marks stanzas that repeat (near-)verbatim as choruses.
+    Returns {"sections": [{label, lines, words}], "summary", "chorus_share"}."""
+    sections: list[dict] = []
+    header_lines = (raw or "").split("\n") if raw else []
+    has_headers = any(_SECTION_HEADER_RE.match(l) for l in header_lines)
+
+    if has_headers:
+        current: dict | None = None
+        for l in header_lines:
+            m = _SECTION_HEADER_RE.match(l)
+            if m:
+                label = _canon_section(m.group(1))
+                if label is None:
+                    # Credit/metadata header like [Produced by ...]; skip it
+                    continue
+                current = {"label": label, "lines": []}
+                sections.append(current)
+                continue
+            text = l.strip()
+            if not text:
+                continue
+            if current is None:
+                current = {"label": "Verse", "lines": []}
+                sections.append(current)
+            current["lines"].append(text)
+        sections = [s for s in sections if s["lines"]]
+
+    if not sections:
+        src = cleaned or raw or ""
+        stanzas = [s.strip() for s in re.split(r"\n\s*\n", src) if s.strip()]
+        if len(stanzas) > 1:
+            norm = [" ".join(_tokens(s)) for s in stanzas]
+            counts = Counter(norm)
+            for s, n in zip(stanzas, norm):
+                label = "Chorus" if counts[n] >= 2 and n else "Verse"
+                sections.append({"label": label, "lines": [l.strip() for l in s.split("\n") if l.strip()]})
+        else:
+            # Flat line list (e.g. LRCLIB synced lyrics): find the chorus as a
+            # repeated run of consecutive lines.
+            sections = _sections_from_repeated_runs(_lines(src))
+
+    # Number repeated verse sections (Verse 1, Verse 2...)
+    verse_count = sum(1 for s in sections if s["label"] == "Verse")
+    seen_verses = 0
+    for s in sections:
+        s["words"] = len(_tokens(" ".join(s["lines"])))
+        if s["label"] == "Verse" and verse_count > 1:
+            seen_verses += 1
+            s["label"] = f"Verse {seen_verses}"
+
+    total_words = sum(s["words"] for s in sections) or 1
+    chorus_words = sum(
+        s["words"] for s in sections if s["label"].split(" ")[0] in CHORUS_LABELS
+    )
+    summary = " – ".join(s["label"] for s in sections)
+    return {
+        "sections": sections,
+        "summary": summary,
+        "chorus_share": round(chorus_words / total_words, 3),
+    }
+
+
 # ---------- POS frequency (kept) ----------
 
 def top_n_by_pos(

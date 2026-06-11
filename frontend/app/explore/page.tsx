@@ -19,6 +19,7 @@ import { EmotionGrid } from "@/components/emotion-grid";
 import { TopicBubbles } from "@/components/topic-bubbles";
 import { SignatureWords, Hooks, RhymePairs, PovProfile } from "@/components/craft-panels";
 import { TrendsChart } from "@/components/trends-chart";
+import { TracksPanel } from "@/components/tracks-panel";
 import {
   getTopWords,
   getSentimentHeatmap,
@@ -27,11 +28,15 @@ import {
   getTopics,
   getCraft,
   getTrends,
+  getTracks,
+  getWordStats,
   type Stats,
   type Topic,
   type Craft,
   type TrendYear,
   type HeatmapTrack,
+  type TrackSummary,
+  type WordStat,
 } from "@/lib/api";
 
 export default function ExplorePage() {
@@ -41,6 +46,8 @@ export default function ExplorePage() {
   const [topics, setTopics] = useState<Topic[]>([]);
   const [craft, setCraft] = useState<Craft | null>(null);
   const [trendYears, setTrendYears] = useState<TrendYear[]>([]);
+  const [trackList, setTrackList] = useState<TrackSummary[]>([]);
+  const [wordStats, setWordStats] = useState<Record<string, WordStat>>({});
   const [loading, setLoading] = useState(true);
   const [selectedWord, setSelectedWord] = useState<string | null>(null);
   const [contexts, setContexts] = useState<{ line: string; artist: string; title: string }[]>([]);
@@ -49,20 +56,25 @@ export default function ExplorePage() {
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const [wordsRes, heatRes, statsRes, topicsRes, craftRes, trendsRes] = await Promise.allSettled([
-        getTopWords(undefined, 100),
-        getSentimentHeatmap(),
-        getStats(),
-        getTopics(),
-        getCraft(),
-        getTrends(),
-      ]);
+      const [wordsRes, heatRes, statsRes, topicsRes, craftRes, trendsRes, tracksRes, wordStatsRes] =
+        await Promise.allSettled([
+          getTopWords(undefined, 100),
+          getSentimentHeatmap(),
+          getStats(),
+          getTopics(),
+          getCraft(),
+          getTrends(),
+          getTracks(),
+          getWordStats(),
+        ]);
       setTopWords(wordsRes.status === "fulfilled" ? wordsRes.value.top_words : []);
       setHeatmapTracks(heatRes.status === "fulfilled" ? heatRes.value.tracks : []);
       setStats(statsRes.status === "fulfilled" && statsRes.value.has_data ? statsRes.value : null);
       setTopics(topicsRes.status === "fulfilled" ? topicsRes.value.topics : []);
       setCraft(craftRes.status === "fulfilled" && craftRes.value.has_data ? craftRes.value : null);
       setTrendYears(trendsRes.status === "fulfilled" ? trendsRes.value.years : []);
+      setTrackList(tracksRes.status === "fulfilled" ? tracksRes.value.tracks : []);
+      setWordStats(wordStatsRes.status === "fulfilled" ? wordStatsRes.value.words : {});
       setLoading(false);
     })();
   }, []);
@@ -135,6 +147,19 @@ export default function ExplorePage() {
                 </CardContent>
               </Card>
             </div>
+
+            <Card className="bg-zinc-900 border-zinc-800">
+              <CardHeader>
+                <CardTitle>Tracks &amp; lyrics</CardTitle>
+                <CardDescription>
+                  Every track with word counts and detected structure. Click one to read the lyrics —
+                  hover any word for usage data.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <TracksPanel tracks={trackList} wordStats={wordStats} onWordClick={onWordClick} />
+              </CardContent>
+            </Card>
 
             <Card className="bg-zinc-900 border-zinc-800">
               <CardHeader>

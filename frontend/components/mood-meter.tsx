@@ -96,17 +96,31 @@ export function MoodMeter({
       <div className="grid grid-cols-2 gap-3 mt-4 w-full max-w-[260px] text-center">
         <div className="rounded-lg border border-zinc-800 p-2">
           <p className="text-lg font-bold">{(intensity * 100).toFixed(0)}%</p>
-          <p className="text-[11px] text-zinc-500">emotional intensity</p>
+          <p className="text-[11px] text-zinc-500">intensity</p>
         </div>
         <div className="rounded-lg border border-zinc-800 p-2">
           <p className="text-lg font-bold">{(volatility * 100).toFixed(0)}%</p>
-          <p className="text-[11px] text-zinc-500">mood volatility</p>
+          <p className="text-[11px] text-zinc-500">volatility</p>
         </div>
       </div>
-      <p className="text-zinc-600 text-[11px] text-center mt-3 max-w-[250px]">
-        Each line is scored with VADER sentiment (−1 to +1). Valence is the average, intensity
-        the average strength, volatility the line-to-line swing.
-      </p>
+      <div className="text-zinc-500 text-[11px] mt-4 space-y-1.5 max-w-[270px]">
+        <p>
+          <span className="text-zinc-300 font-semibold">Valence</span> — does the language read
+          positive or negative? &ldquo;I love it here&rdquo; scores high; &ldquo;everything is
+          ruined&rdquo; scores low. 0 is neutral.
+        </p>
+        <p>
+          <span className="text-zinc-300 font-semibold">Intensity</span> — how emotionally charged
+          the wording is, in either direction. Plain description scores near 0.
+        </p>
+        <p>
+          <span className="text-zinc-300 font-semibold">Volatility</span> — how hard the tone swings
+          from one line to the next. High = whiplash between bright and dark lines.
+        </p>
+        <p className="text-zinc-600">
+          Each lyric line is scored −1…+1 with the VADER sentiment model, then averaged per song.
+        </p>
+      </div>
     </div>
   );
 }

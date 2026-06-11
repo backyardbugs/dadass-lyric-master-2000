@@ -205,6 +205,18 @@ def get_artist_data(
 _LRCLIB_UA = "DadAssLyricAnalyzer/0.1.0"
 
 
+def _title_matches(query: str, candidate: str) -> bool:
+    """Loose title match so the fuzzy fallback can't return a different song."""
+    def norm(s: str) -> set[str]:
+        return set(re.findall(r"[a-z']+", s.lower()))
+
+    q, c = norm(query), norm(candidate)
+    if not q or not c:
+        return False
+    overlap = len(q & c) / len(q)
+    return overlap >= 0.6 or q <= c or c <= q
+
+
 def _fetch_lyrics_lrclib(artist: str, title: str) -> str | None:
     """Fetch plain lyrics from LRCLIB (free, no key, no scraping). Fallback when Genius is blocked."""
     headers = {"User-Agent": _LRCLIB_UA}
@@ -218,10 +230,14 @@ def _fetch_lyrics_lrclib(artist: str, title: str) -> str | None:
             timeout=10,
         )
         if r.status_code == 200:
-            lyrics = (r.json().get("plainLyrics") or "").strip()
+            data = r.json()
+            if data.get("instrumental"):
+                return None
+            lyrics = (data.get("plainLyrics") or "").strip()
             if lyrics:
                 return lyrics
-        # Fuzzy search fallback for slight title/artist mismatches
+        # Fuzzy search fallback for slight title/artist mismatches — but verify the
+        # result is actually the same song, not just something by the same artist.
         r = requests.get(
             "https://lrclib.net/api/search",
             params={"artist_name": primary_artist, "track_name": title},
@@ -230,6 +246,12 @@ def _fetch_lyrics_lrclib(artist: str, title: str) -> str | None:
         )
         if r.status_code == 200:
             for item in r.json() or []:
+                if item.get("instrumental"):
+                    continue
+                if not _title_matches(title, item.get("trackName") or ""):
+                    continue
+                if not _title_matches(primary_artist, item.get("artistName") or ""):
+                    continue
                 lyrics = (item.get("plainLyrics") or "").strip()
                 if lyrics:
                     return lyrics
@@ -266,12 +288,7 @@ def fetch_lyrics_for_tracks(tracks: list[dict], genius_token: str | None = None)
                     genius_blocked.set()
         if not lyrics:
             lyrics = _fetch_lyrics_lrclib(artist, search_title)
-        return {
-            "spotify_id": t.get("spotify_id"),
-            "artist": artist,
-            "title": title,
-            "lyrics": lyrics,
-        }
+        return {**t, "lyrics": lyrics}
 
     with ThreadPoolExecutor(max_workers=6) as ex:
         return list(ex.map(resolve, tracks))

@@ -32,15 +32,17 @@ export function SignatureWords({
                 style={{ width: `${Math.max(4, (w.score / maxScore) * 100)}%` }}
               />
             </div>
-            <span className="w-40 shrink-0 text-xs text-zinc-500 font-mono">
-              ×{w.ratio >= 100 ? Math.round(w.ratio) : w.ratio} · {w.songs} song{w.songs === 1 ? "" : "s"}
+            <span className="w-48 shrink-0 text-xs text-zinc-500">
+              <span className="font-mono text-zinc-300">{w.ratio >= 100 ? Math.round(w.ratio) : w.ratio}×</span> vs
+              everyday English · {w.songs} song{w.songs === 1 ? "" : "s"}
             </span>
           </li>
         ))}
       </ul>
       <p className="text-[11px] text-zinc-600 mt-3">
-        How much more often a word appears here than in everyday English (wordfreq corpus). Click a word
-        for its lyric lines.
+        &ldquo;28× vs everyday English&rdquo; means the word shows up 28 times more often in these lyrics than
+        in ordinary written English — a deliberate word choice, not background vocabulary. Click a word
+        to see every line it appears in.
       </p>
     </div>
   );
