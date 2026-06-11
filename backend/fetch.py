@@ -9,6 +9,7 @@ import re
 import time
 from pathlib import Path
 
+import requests
 from dotenv import load_dotenv
 from lyricsgenius import Genius
 from spotipy import Spotify
@@ -84,8 +85,45 @@ def get_spotify_tracks(playlist_id: str, access_token: str | None = None) -> lis
     return tracks
 
 
+_LRCLIB_UA = "EmoAlmanac/0.1.0"
+
+
+def _fetch_lyrics_lrclib(artist: str, title: str) -> str | None:
+    """Fetch plain lyrics from LRCLIB (free, no key, no scraping). Fallback when Genius is blocked."""
+    headers = {"User-Agent": _LRCLIB_UA}
+    # Spotify joins multiple artists with ", "; LRCLIB usually indexes the primary artist.
+    primary_artist = artist.split(",")[0].strip()
+    try:
+        r = requests.get(
+            "https://lrclib.net/api/get",
+            params={"artist_name": primary_artist, "track_name": title},
+            headers=headers,
+            timeout=10,
+        )
+        if r.status_code == 200:
+            lyrics = (r.json().get("plainLyrics") or "").strip()
+            if lyrics:
+                return lyrics
+        # Fuzzy search fallback for slight title/artist mismatches
+        r = requests.get(
+            "https://lrclib.net/api/search",
+            params={"artist_name": primary_artist, "track_name": title},
+            headers=headers,
+            timeout=10,
+        )
+        if r.status_code == 200:
+            for item in r.json() or []:
+                lyrics = (item.get("plainLyrics") or "").strip()
+                if lyrics:
+                    return lyrics
+    except Exception:
+        pass
+    return None
+
+
 def fetch_lyrics_for_tracks(tracks: list[dict], genius_token: str | None = None) -> list[dict]:
-    """For each track, search Genius and attach lyrics. Returns list of {artist, title, spotify_id, lyrics}."""
+    """For each track, search Genius (falling back to LRCLIB) and attach lyrics.
+    Returns list of {artist, title, spotify_id, lyrics}."""
     token = genius_token or os.getenv("GENIUS_ACCESS_TOKEN")
     if not token:
         raise RuntimeError("Set GENIUS_ACCESS_TOKEN in .env")
@@ -103,7 +141,10 @@ def fetch_lyrics_for_tracks(tracks: list[dict], genius_token: str | None = None)
             if song and getattr(song, "lyrics", None):
                 lyrics = song.lyrics.strip()
         except Exception:
+            # Genius page scraping is often blocked (Cloudflare) from datacenter IPs
             pass
+        if not lyrics:
+            lyrics = _fetch_lyrics_lrclib(artist, title)
         results.append({
             "spotify_id": t.get("spotify_id"),
             "artist": artist,

@@ -200,7 +200,17 @@ def api_fetch(body: FetchRequest, request: Request):
         if "timeout" in msg_lower or "timed out" in msg_lower:
             raise HTTPException(status_code=504, detail="Request timed out. Try again.")
         if "401" in msg or "unauthorized" in msg_lower or "invalid" in msg_lower and "token" in msg_lower:
-            raise HTTPException(status_code=500, detail="API key problem. Check your Spotify and Genius keys in Render dashboard.")
+            # Spotify returns 401 "Valid user authentication required" when reading
+            # playlists with an app-only token — that means "log in", not "bad keys".
+            if "user authentication required" in msg_lower or not spotify_token:
+                raise HTTPException(
+                    status_code=401,
+                    detail="Log in with Spotify first (Spotify requires this to read playlists). Click “Log in with Spotify” above.",
+                )
+            raise HTTPException(
+                status_code=401,
+                detail="Your Spotify session expired. Click “Log in with Spotify” again.",
+            )
         if "404" in msg or "not found" in msg_lower:
             raise HTTPException(status_code=404, detail="Playlist not found. Check the URL and that the playlist is public.")
         if "403" in msg or "forbidden" in msg_lower:
