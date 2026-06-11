@@ -12,8 +12,10 @@ export async function GET(request: NextRequest) {
   const { searchParams } = url;
   const code = searchParams.get("code");
   const error = searchParams.get("error");
-  // Use the actual URL we were called with so redirect_uri matches what Spotify used (required by Spotify).
-  const redirectUri = `${url.origin}${url.pathname}`;
+  // Must exactly match the redirect_uri used in the authorize step. Prefer the configured
+  // value: behind proxies/port-forwards the Host header (url.origin) can differ from the
+  // address Spotify actually redirected to (e.g. localhost vs 127.0.0.1).
+  const redirectUri = process.env.SPOTIFY_REDIRECT_URI || `${url.origin}${url.pathname}`;
   const baseAppUrl = url.origin;
 
   if (error || !code) {
