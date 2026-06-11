@@ -212,6 +212,13 @@ def api_fetch(body: FetchRequest, request: Request):
                 detail="Your Spotify session expired. Click “Log in with Spotify” again.",
             )
         if "404" in msg or "not found" in msg_lower:
+            # Spotify-generated playlists (Made For You, Daily Mix, editorial) start with
+            # 37i9dQZF and have been blocked from the Web API since Nov 2024 — they 404 for everyone.
+            if playlist_id.startswith("37i9dQZF"):
+                raise HTTPException(
+                    status_code=404,
+                    detail="This is a Spotify-made playlist (Made For You / Daily Mix / editorial). Spotify blocks these from its API, so they can't be fetched. Use a playlist created by a person — e.g. one of your own.",
+                )
             raise HTTPException(status_code=404, detail="Playlist not found. Check the URL and that the playlist is public.")
         if "403" in msg or "forbidden" in msg_lower:
             if not spotify_token:
