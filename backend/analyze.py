@@ -17,6 +17,10 @@ try:
 except LookupError:
     nltk.download("punkt", quiet=True)
 try:
+    nltk.data.find("tokenizers/punkt_tab")
+except LookupError:
+    nltk.download("punkt_tab", quiet=True)
+try:
     nltk.data.find("taggers/averaged_perceptron_tagger_eng")
 except LookupError:
     nltk.download("averaged_perceptron_tagger_eng", quiet=True)
