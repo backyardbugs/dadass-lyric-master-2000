@@ -69,6 +69,8 @@ export type Status = {
   last_analyzed: string | null;
   playlist_name: string | null;
   image_url: string | null;
+  gemini_enabled?: boolean;
+  gemini_status?: { ok?: boolean; message?: string; tracks_enriched?: number } | null;
 };
 
 export const getSpotifyLoginUrl = () => `${API_BASE}/api/auth/spotify`;
@@ -99,9 +101,15 @@ export async function fetchPlaylist(playlistUrl: string): Promise<{ ok: boolean;
   });
 }
 
-const ANALYZE_TIMEOUT_MS = 120000;
+const ANALYZE_TIMEOUT_MS = 300000;
 
-export async function runAnalyze(): Promise<{ ok: boolean; message: string; top_words: { word: string; count: number }[]; run_id: number }> {
+export async function runAnalyze(): Promise<{
+  ok: boolean;
+  message: string;
+  top_words: { word: string; count: number }[];
+  run_id: number;
+  gemini?: { ok?: boolean; message?: string; tracks_enriched?: number } | null;
+}> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), ANALYZE_TIMEOUT_MS);
   try {
@@ -120,7 +128,7 @@ export async function runAnalyze(): Promise<{ ok: boolean; message: string; top_
   } catch (e) {
     clearTimeout(timeoutId);
     if (e instanceof Error && e.name === "AbortError") {
-      throw new Error("Analysis timed out. Try a smaller playlist (e.g. under 30 tracks) or try again.");
+      throw new Error("Analysis timed out. Gemini craft pass can take a few minutes on larger albums — try again or use a smaller dataset.");
     }
     const msg = e instanceof Error ? e.message : "Network error";
     if (/failed to fetch|load failed|network error/i.test(msg)) {
@@ -227,9 +235,26 @@ export type TrackLine = {
   text: string;
   valence: number;
   act: string;
+  act_source?: "gemini" | "rules";
   rhyme_letter: string;
   rhyme_kind: "perfect" | "slant" | null;
   end_word: string;
+  line_index?: number;
+};
+
+export type TrackMetaphor = {
+  phrase: string;
+  source: string;
+  target: string;
+  line: number;
+  note: string;
+};
+
+export type TrackGemini = {
+  available: boolean;
+  summary: string;
+  metaphors: TrackMetaphor[];
+  imagery: Record<string, Record<string, string>>;
 };
 
 export type TrackSection = { label: string; lines: TrackLine[]; words: number };
@@ -261,6 +286,7 @@ export type TrackDetail = {
   sections: TrackSection[];
   summary: string;
   chorus_share: number;
+  gemini?: TrackGemini;
 };
 
 export async function getTrack(id: number): Promise<TrackDetail> {
@@ -300,11 +326,13 @@ export async function getWordContext(word: string): Promise<{ word: string; cont
 export type Topic = {
   id: number;
   label: string;
+  description?: string;
+  keywords?: string[];
   topic_index: number;
   top_tracks: { title: string; artist: string; weight: number }[];
 };
 
-export async function getTopics(): Promise<{ topics: Topic[] }> {
+export async function getTopics(): Promise<{ topics: Topic[]; source?: "gemini" | "nmf" | "none" }> {
   return fetchApi("/api/topics");
 }
 

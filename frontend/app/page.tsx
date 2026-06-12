@@ -125,8 +125,8 @@ export default function DashboardPage() {
     setLoading("analyze");
     setMessage(null);
     try {
-      await runAnalyze();
-      setMessage({ type: "success", text: "Analysis complete." });
+      const res = await runAnalyze();
+      setMessage({ type: "success", text: res.message || "Analysis complete." });
       await loadStatus();
     } catch (e) {
       setMessage({ type: "error", text: e instanceof Error ? e.message : "Analysis failed." });
@@ -185,7 +185,7 @@ export default function DashboardPage() {
                 variant="outline"
                 className="border-zinc-600"
               >
-                {loading === "analyze" ? "Analyzing…" : "Analyze"}
+                {loading === "analyze" ? "Analyzing… (includes Gemini craft pass)" : "Analyze"}
               </Button>
             </div>
             {message && (

@@ -88,6 +88,9 @@ def init_db() -> None:
             "ALTER TABLE track ADD COLUMN release_year INTEGER",
             "ALTER TABLE track ADD COLUMN album_image TEXT",
             "ALTER TABLE playlist ADD COLUMN image_url TEXT",
+            "ALTER TABLE track ADD COLUMN llm_json TEXT",
+            "ALTER TABLE analysis_run ADD COLUMN llm_themes_json TEXT",
+            "ALTER TABLE analysis_run ADD COLUMN llm_status_json TEXT",
         ):
             try:
                 conn.execute(ddl)
@@ -320,6 +323,92 @@ def update_track_metrics(track_id: int, metrics: dict) -> None:
             (json.dumps(metrics), track_id),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def get_track_llm(track_id: int) -> dict | None:
+    conn = get_connection()
+    try:
+        row = conn.execute("SELECT llm_json FROM track WHERE id=?", (track_id,)).fetchone()
+        if not row or not row[0]:
+            return None
+        try:
+            return json.loads(row[0])
+        except (ValueError, TypeError):
+            return None
+    finally:
+        conn.close()
+
+
+def update_track_llm(track_id: int, llm: dict) -> None:
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE track SET llm_json=? WHERE id=?",
+            (json.dumps(llm), track_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def update_run_llm_themes(run_id: int, themes: list[dict]) -> None:
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE analysis_run SET llm_themes_json=? WHERE id=?",
+            (json.dumps(themes), run_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def update_run_llm_status(run_id: int, status: dict) -> None:
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE analysis_run SET llm_status_json=? WHERE id=?",
+            (json.dumps(status), run_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_run_llm_themes(run_id: int) -> list[dict] | None:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT llm_themes_json FROM analysis_run WHERE id=?",
+            (run_id,),
+        ).fetchone()
+        if not row or not row[0]:
+            return None
+        try:
+            data = json.loads(row[0])
+            return data if isinstance(data, list) else None
+        except (ValueError, TypeError):
+            return None
+    finally:
+        conn.close()
+
+
+def get_run_llm_status(run_id: int) -> dict | None:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT llm_status_json FROM analysis_run WHERE id=?",
+            (run_id,),
+        ).fetchone()
+        if not row or not row[0]:
+            return None
+        try:
+            data = json.loads(row[0])
+            return data if isinstance(data, dict) else None
+        except (ValueError, TypeError):
+            return None
     finally:
         conn.close()
 
