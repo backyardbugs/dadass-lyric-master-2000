@@ -13,8 +13,12 @@ from typing import Any
 
 import requests
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+def _api_key() -> str | None:
+    return os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or None
+
+
+def _model() -> str:
+    return os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 # Chunk when the corpus doc exceeds this many characters (~15 songs typical).
 MAX_DOC_CHARS = int(os.getenv("GEMINI_MAX_DOC_CHARS", "70000"))
 MAX_TRACKS_PER_CHUNK = int(os.getenv("GEMINI_CHUNK_TRACKS", "12"))
@@ -29,7 +33,7 @@ _VALID_IMAGERY = {"concrete", "abstract", "referential"}
 def is_enabled() -> bool:
     if os.getenv("GEMINI_ENABLED", "1").lower() in ("0", "false", "no"):
         return False
-    return bool(GEMINI_API_KEY)
+    return bool(_api_key())
 
 
 def is_available() -> bool:
@@ -113,9 +117,11 @@ def _extract_json(text: str) -> dict | None:
 
 
 def _call_gemini(prompt: str, *, temperature: float = 0.2, timeout: int = 120) -> str | None:
-    if not GEMINI_API_KEY:
+    api_key = _api_key()
+    if not api_key:
         return None
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+    model = _model()
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
@@ -123,7 +129,7 @@ def _call_gemini(prompt: str, *, temperature: float = 0.2, timeout: int = 120) -
             "responseMimeType": "application/json",
         },
     }
-    headers = {"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"}
+    headers = {"x-goog-api-key": api_key, "Content-Type": "application/json"}
     for attempt in range(4):
         try:
             resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
@@ -217,7 +223,7 @@ def _normalize_track_entry(raw: dict, track: dict) -> dict | None:
     text = "\n".join(lines)
     return {
         "hash": lyrics_hash(text),
-        "model": GEMINI_MODEL,
+        "model": _model(),
         "summary": str(raw.get("summary", "")).strip(),
         "sections": _normalize_sections(raw.get("sections"), len(lines)),
         "line_acts": _normalize_line_acts(raw.get("lines"), len(lines)),

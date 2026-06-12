@@ -417,9 +417,15 @@ class StatusResponse(BaseModel):
 @app.get("/api/status", response_model=StatusResponse)
 def api_status():
     """Return whether we have playlist data and last analysis time."""
+    gemini_enabled = llm_module.is_enabled()
     info = db.get_playlist_info()
     if not info:
-        return StatusResponse(has_data=False, track_count=0, last_analyzed=None)
+        return StatusResponse(
+            has_data=False,
+            track_count=0,
+            last_analyzed=None,
+            gemini_enabled=gemini_enabled,
+        )
     run_id = db.get_latest_run_id(info["id"])
     last_analyzed = None
     gemini_status = None
@@ -440,6 +446,32 @@ def api_status():
         image_url=info.get("image_url") or None,
         gemini_enabled=llm_module.is_enabled(),
         gemini_status=gemini_status,
+    )
+
+
+class ConfigHealthResponse(BaseModel):
+    gemini_enabled: bool
+    env: dict[str, bool]
+
+
+@app.get("/api/health/config", response_model=ConfigHealthResponse)
+def api_health_config():
+    """Report which required env vars are set (never exposes secret values)."""
+    keys = (
+        "SPOTIPY_CLIENT_ID",
+        "SPOTIPY_CLIENT_SECRET",
+        "GENIUS_ACCESS_TOKEN",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "GEMINI_MODEL",
+        "GEMINI_ENABLED",
+        "CORS_ORIGINS",
+        "FRONTEND_URL",
+        "SPOTIFY_REDIRECT_URI",
+    )
+    return ConfigHealthResponse(
+        gemini_enabled=llm_module.is_enabled(),
+        env={k: bool(os.getenv(k, "").strip()) for k in keys},
     )
 
 
