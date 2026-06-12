@@ -45,17 +45,15 @@ export function WordCloud({
   const [pos, setPos] = useState<string | undefined>(undefined);
   const [shown, setShown] = useState<WordItem[]>(words);
   const [loading, setLoading] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+  const [filter, setFilter] = useState("");
 
   useEffect(() => {
-    if (pos === undefined) {
-      setShown(words);
-      return;
-    }
     let cancelled = false;
     setLoading(true);
-    getTopWords(pos, 80)
-      .then((res) => !cancelled && setShown(res.top_words))
-      .catch(() => !cancelled && setShown([]))
+    getTopWords(pos, 600)
+      .then((res) => !cancelled && setShown(pos === undefined && res.top_words.length === 0 ? words : res.top_words))
+      .catch(() => !cancelled && setShown(pos === undefined ? words : []))
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
@@ -70,7 +68,7 @@ export function WordCloud({
 
   return (
     <div>
-      <div className="flex flex-wrap gap-2 mb-4">
+      <div className="flex flex-wrap gap-2 mb-4 items-center">
         {POS_TABS.map((tab) => (
           <button
             key={tab.label}
@@ -85,11 +83,48 @@ export function WordCloud({
             {tab.label}
           </button>
         ))}
+        <button
+          type="button"
+          onClick={() => setShowAll(!showAll)}
+          className="ml-auto px-3 py-1 rounded-full text-xs font-semibold border border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200 transition-colors"
+        >
+          {showAll ? "Cloud view" : "Full list"}
+        </button>
       </div>
       {loading ? (
         <p className="text-zinc-500 text-sm p-4">Loading…</p>
       ) : shown.length === 0 ? (
         <p className="text-zinc-500 text-sm p-4">Nothing here — run Analyze again to tag parts of speech.</p>
+      ) : showAll ? (
+        <div>
+          <input
+            type="text"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="Search words…"
+            className="w-full max-w-xs mb-3 rounded-md bg-zinc-800 border border-zinc-700 px-3 py-1.5 text-sm outline-none focus:border-zinc-500"
+          />
+          <div className="max-h-[360px] overflow-y-auto rounded-lg border border-zinc-800">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
+              {shown
+                .filter((w) => !filter || w.word.includes(filter.toLowerCase()))
+                .map((w) => (
+                  <button
+                    key={w.word}
+                    type="button"
+                    onClick={() => onWordClick?.(w.word)}
+                    className="flex justify-between gap-2 px-3 py-1.5 text-sm hover:bg-zinc-800/60 text-left border-b border-r border-zinc-800/50"
+                  >
+                    <span className="truncate">{w.word}</span>
+                    <span className="text-zinc-500 font-mono text-xs">{w.count}</span>
+                  </button>
+                ))}
+            </div>
+          </div>
+          <p className="text-[11px] text-zinc-600 mt-2">
+            All {shown.length} words{pos ? ` tagged as ${pos}s` : ""}, by count. Click one for its lyric lines.
+          </p>
+        </div>
       ) : (
         <div className="flex flex-wrap gap-x-2 gap-y-1 justify-center items-baseline p-4 min-h-[200px]">
           {shown.slice(0, 80).map((w, i) => {

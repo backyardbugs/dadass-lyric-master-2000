@@ -1,6 +1,7 @@
 "use client";
 
 import type { Stats, Superlative } from "@/lib/api";
+import { brightness, whiplash } from "@/lib/tone";
 
 function HighlightCard({
   title,
@@ -47,19 +48,19 @@ export function StatCards({ stats }: { stats: Stats }) {
         <HighlightCard
           title="Darkest track"
           item={s.darkest}
-          format={(v) => `valence ${v.toFixed(2)}`}
+          format={(v) => `brightness ${brightness(v)}/100`}
           accent="text-indigo-400"
         />
         <HighlightCard
           title="Brightest track"
           item={s.brightest}
-          format={(v) => `valence +${v.toFixed(2)}`}
+          format={(v) => `brightness ${brightness(v)}/100`}
           accent="text-amber-400"
         />
         <HighlightCard
           title="Biggest mood swings"
           item={s.most_volatile}
-          format={(v) => `volatility ${(v * 100).toFixed(0)}%`}
+          format={(v) => `whiplash ${whiplash(v)}/100`}
           accent="text-emerald-400"
         />
         <HighlightCard

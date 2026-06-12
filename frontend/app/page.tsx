@@ -21,7 +21,7 @@ export default function DashboardPage() {
       const s = await getStatus();
       setStatus(s);
     } catch {
-      setStatus({ has_data: false, track_count: 0, last_analyzed: null, playlist_name: null });
+      setStatus({ has_data: false, track_count: 0, last_analyzed: null, playlist_name: null, image_url: null });
     }
   };
 

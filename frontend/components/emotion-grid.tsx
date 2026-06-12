@@ -2,12 +2,12 @@
 
 import { useMemo, useState } from "react";
 import type { HeatmapTrack } from "@/lib/api";
+import { brightness, heat, whiplash } from "@/lib/tone";
 
 export function EmotionGrid({ tracks }: { tracks: HeatmapTrack[] }) {
   const [hovered, setHovered] = useState<HeatmapTrack | null>(null);
-  const maxAbsVal = useMemo(() => Math.max(0.05, ...tracks.map((t) => Math.abs(t.valence))), [tracks]);
-  const maxInt = useMemo(() => Math.max(0.05, ...tracks.map((t) => t.intensity)), [tracks]);
-  const maxVol = useMemo(() => Math.max(0.05, ...tracks.map((t) => t.volatility)), [tracks]);
+  const maxH = useMemo(() => Math.max(10, ...tracks.map((t) => heat(t.intensity))), [tracks]);
+  const maxW = useMemo(() => Math.max(10, ...tracks.map((t) => whiplash(t.volatility))), [tracks]);
 
   if (tracks.length === 0) return <p className="text-zinc-500 text-sm">No data. Run analysis first.</p>;
 
@@ -15,16 +15,16 @@ export function EmotionGrid({ tracks }: { tracks: HeatmapTrack[] }) {
 
   const rows: { label: string; color: (t: HeatmapTrack) => string }[] = [
     {
-      label: "valence",
+      label: "brightness",
       color: (t) => {
-        const p = t.valence / maxAbsVal; // -1..1
+        const p = (brightness(t.valence) - 50) / 50; // -1..1
         return p >= 0
           ? `rgba(251, 191, 36, ${0.1 + 0.9 * p})`
           : `rgba(99, 102, 241, ${0.1 + 0.9 * -p})`;
       },
     },
-    { label: "intensity", color: (t) => `rgba(244, 63, 94, ${0.08 + 0.92 * (t.intensity / maxInt)})` },
-    { label: "volatility", color: (t) => `rgba(52, 211, 153, ${0.08 + 0.92 * (t.volatility / maxVol)})` },
+    { label: "heat", color: (t) => `rgba(244, 63, 94, ${0.08 + 0.92 * (heat(t.intensity) / maxH)})` },
+    { label: "whiplash", color: (t) => `rgba(52, 211, 153, ${0.08 + 0.92 * (whiplash(t.volatility) / maxW)})` },
   ];
 
   return (
@@ -55,12 +55,11 @@ export function EmotionGrid({ tracks }: { tracks: HeatmapTrack[] }) {
         {hovered ? (
           <>
             <span className="text-zinc-200 font-semibold">{hovered.title}</span>
-            {" — "}valence {hovered.valence >= 0 ? "+" : ""}
-            {hovered.valence.toFixed(2)} · intensity {(hovered.intensity * 100).toFixed(0)}% · volatility{" "}
-            {(hovered.volatility * 100).toFixed(0)}%
+            {" — "}brightness {brightness(hovered.valence)} · heat {heat(hovered.intensity)} · whiplash{" "}
+            {whiplash(hovered.volatility)}
           </>
         ) : (
-          "Hover a cell — each column is a track in order. Valence: indigo = dark, amber = bright."
+          "Hover a cell — each column is a track in order. Brightness: indigo = dark, amber = bright."
         )}
       </p>
     </div>

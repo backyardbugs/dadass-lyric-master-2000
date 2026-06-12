@@ -86,6 +86,8 @@ def init_db() -> None:
         for ddl in (
             "ALTER TABLE track ADD COLUMN metrics_json TEXT",
             "ALTER TABLE track ADD COLUMN release_year INTEGER",
+            "ALTER TABLE track ADD COLUMN album_image TEXT",
+            "ALTER TABLE playlist ADD COLUMN image_url TEXT",
         ):
             try:
                 conn.execute(ddl)
@@ -96,15 +98,15 @@ def init_db() -> None:
         conn.close()
 
 
-def insert_playlist(playlist_id: str, name: str | None = None) -> int:
+def insert_playlist(playlist_id: str, name: str | None = None, image_url: str | None = None) -> int:
     """Insert or replace playlist; return playlist table id."""
     conn = get_connection()
     try:
         fetched_at = datetime.utcnow().isoformat() + "Z"
         conn.execute(
-            "INSERT INTO playlist (playlist_id, name, fetched_at) VALUES (?, ?, ?)"
-            " ON CONFLICT(playlist_id) DO UPDATE SET name=excluded.name, fetched_at=excluded.fetched_at",
-            (playlist_id, name or "", fetched_at),
+            "INSERT INTO playlist (playlist_id, name, fetched_at, image_url) VALUES (?, ?, ?, ?)"
+            " ON CONFLICT(playlist_id) DO UPDATE SET name=excluded.name, fetched_at=excluded.fetched_at, image_url=excluded.image_url",
+            (playlist_id, name or "", fetched_at, image_url),
         )
         conn.commit()
         row = conn.execute("SELECT id FROM playlist WHERE playlist_id = ?", (playlist_id,)).fetchone()
@@ -120,8 +122,8 @@ def insert_tracks(playlist_pk: int, tracks: list[dict]) -> None:
         conn.execute("DELETE FROM track WHERE playlist_id = ?", (playlist_pk,))
         for t in tracks:
             conn.execute(
-                """INSERT INTO track (playlist_id, artist, title, spotify_id, raw_lyrics, cleaned_lyrics, release_year)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO track (playlist_id, artist, title, spotify_id, raw_lyrics, cleaned_lyrics, release_year, album_image)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     playlist_pk,
                     t["artist"],
@@ -130,6 +132,7 @@ def insert_tracks(playlist_pk: int, tracks: list[dict]) -> None:
                     t.get("raw_lyrics") or t.get("lyrics"),
                     t.get("cleaned_lyrics"),
                     t.get("release_year"),
+                    t.get("album_image"),
                 ),
             )
         conn.commit()
@@ -158,7 +161,7 @@ def get_tracks(playlist_pk: int | None = None) -> list[dict]:
         if playlist_pk is None:
             return []
         rows = conn.execute(
-            "SELECT id, artist, title, raw_lyrics, cleaned_lyrics, metrics_json, release_year FROM track WHERE playlist_id = ? ORDER BY id",
+            "SELECT id, artist, title, raw_lyrics, cleaned_lyrics, metrics_json, release_year, album_image FROM track WHERE playlist_id = ? ORDER BY id",
             (playlist_pk,),
         ).fetchall()
         out = []
@@ -178,8 +181,35 @@ def get_tracks(playlist_pk: int | None = None) -> list[dict]:
                 "lyrics": r["cleaned_lyrics"] or r["raw_lyrics"],
                 "metrics": metrics,
                 "release_year": r["release_year"],
+                "album_image": r["album_image"],
             })
         return out
+    finally:
+        conn.close()
+
+
+def get_known_lyrics() -> dict[tuple[str, str], str]:
+    """(artist, title) -> raw lyrics for every track we've ever fetched lyrics for.
+    Lets refetches reuse lyrics instead of hammering the lyrics APIs."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT artist, title, raw_lyrics FROM track WHERE raw_lyrics IS NOT NULL AND raw_lyrics != ''"
+        ).fetchall()
+        return {(r["artist"].lower(), r["title"].lower()): r["raw_lyrics"] for r in rows}
+    finally:
+        conn.close()
+
+
+def get_baseline_tracks(exclude_playlist_pk: int) -> list[dict]:
+    """Lyrics of all tracks from other datasets (for the lyrics-baseline comparison)."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT raw_lyrics, cleaned_lyrics FROM track WHERE playlist_id != ?",
+            (exclude_playlist_pk,),
+        ).fetchall()
+        return [{"raw_lyrics": r["raw_lyrics"], "cleaned_lyrics": r["cleaned_lyrics"]} for r in rows]
     finally:
         conn.close()
 
@@ -193,7 +223,7 @@ def get_playlist_info(playlist_pk: int | None = None) -> dict | None:
         if playlist_pk is None:
             return None
         row = conn.execute(
-            "SELECT id, playlist_id, name, fetched_at FROM playlist WHERE id = ?",
+            "SELECT id, playlist_id, name, fetched_at, image_url FROM playlist WHERE id = ?",
             (playlist_pk,),
         ).fetchone()
         if not row:
@@ -204,6 +234,7 @@ def get_playlist_info(playlist_pk: int | None = None) -> dict | None:
             "playlist_id": row["playlist_id"],
             "name": row["name"],
             "fetched_at": row["fetched_at"],
+            "image_url": row["image_url"],
             "track_count": count,
         }
     finally:

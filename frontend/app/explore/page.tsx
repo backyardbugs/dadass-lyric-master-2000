@@ -18,6 +18,8 @@ import { MoodFlow } from "@/components/mood-flow";
 import { EmotionGrid } from "@/components/emotion-grid";
 import { TopicBubbles } from "@/components/topic-bubbles";
 import { SignatureWords, Hooks, RhymePairs, PovProfile } from "@/components/craft-panels";
+import { SoundProfilePanel, DictionPanel, SpeechActsPanel, SectionContrastPanel } from "@/components/craft-extra";
+import { AlbumBarcode } from "@/components/album-barcode";
 import { TrendsChart } from "@/components/trends-chart";
 import { TracksPanel } from "@/components/tracks-panel";
 import {
@@ -30,6 +32,7 @@ import {
   getTrends,
   getTracks,
   getWordStats,
+  getBarcode,
   type Stats,
   type Topic,
   type Craft,
@@ -37,6 +40,7 @@ import {
   type HeatmapTrack,
   type TrackSummary,
   type WordStat,
+  type BarcodeTrack,
 } from "@/lib/api";
 
 export default function ExplorePage() {
@@ -48,6 +52,7 @@ export default function ExplorePage() {
   const [trendYears, setTrendYears] = useState<TrendYear[]>([]);
   const [trackList, setTrackList] = useState<TrackSummary[]>([]);
   const [wordStats, setWordStats] = useState<Record<string, WordStat>>({});
+  const [barcode, setBarcode] = useState<BarcodeTrack[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedWord, setSelectedWord] = useState<string | null>(null);
   const [contexts, setContexts] = useState<{ line: string; artist: string; title: string }[]>([]);
@@ -56,7 +61,7 @@ export default function ExplorePage() {
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const [wordsRes, heatRes, statsRes, topicsRes, craftRes, trendsRes, tracksRes, wordStatsRes] =
+      const [wordsRes, heatRes, statsRes, topicsRes, craftRes, trendsRes, tracksRes, wordStatsRes, barcodeRes] =
         await Promise.allSettled([
           getTopWords(undefined, 100),
           getSentimentHeatmap(),
@@ -66,6 +71,7 @@ export default function ExplorePage() {
           getTrends(),
           getTracks(),
           getWordStats(),
+          getBarcode(),
         ]);
       setTopWords(wordsRes.status === "fulfilled" ? wordsRes.value.top_words : []);
       setHeatmapTracks(heatRes.status === "fulfilled" ? heatRes.value.tracks : []);
@@ -75,6 +81,7 @@ export default function ExplorePage() {
       setTrendYears(trendsRes.status === "fulfilled" ? trendsRes.value.years : []);
       setTrackList(tracksRes.status === "fulfilled" ? tracksRes.value.tracks : []);
       setWordStats(wordStatsRes.status === "fulfilled" ? wordStatsRes.value.words : {});
+      setBarcode(barcodeRes.status === "fulfilled" ? barcodeRes.value.tracks : []);
       setLoading(false);
     })();
   }, []);
@@ -97,17 +104,27 @@ export default function ExplorePage() {
     <div className="min-h-screen bg-zinc-950 text-zinc-100 p-6">
       <div className="max-w-5xl mx-auto space-y-6">
         <header className="flex items-center justify-between flex-wrap gap-2">
-          <div>
-            <h1 className="text-3xl font-black tracking-tight">Explore</h1>
-            <p className="text-zinc-500 text-sm">
-              {stats?.name ? (
-                <>
-                  Dataset: <span className="text-zinc-300 font-semibold">{stats.name}</span>
-                </>
-              ) : (
-                "Visualizations of your lyric dataset."
-              )}
-            </p>
+          <div className="flex items-center gap-4">
+            {stats?.image_url && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={stats.image_url}
+                alt=""
+                className="w-16 h-16 rounded-lg object-cover border border-zinc-800 shadow-lg"
+              />
+            )}
+            <div>
+              <h1 className="text-3xl font-black tracking-tight">Explore</h1>
+              <p className="text-zinc-500 text-sm">
+                {stats?.name ? (
+                  <>
+                    Dataset: <span className="text-zinc-300 font-semibold">{stats.name}</span>
+                  </>
+                ) : (
+                  "Visualizations of your lyric dataset."
+                )}
+              </p>
+            </div>
           </div>
           <Button asChild variant="outline" size="sm" className="border-zinc-600">
             <Link href="/">Back to dashboard</Link>
@@ -185,6 +202,30 @@ export default function ExplorePage() {
               </CardContent>
             </Card>
 
+            <Card className="bg-zinc-900 border-zinc-800">
+              <CardHeader>
+                <CardTitle>Sound &amp; rhyme habits</CardTitle>
+                <CardDescription>
+                  How the lyrics sound: rhyme types, sound devices, and the consonant palette.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {craft ? <SoundProfilePanel craft={craft} /> : <p className="text-zinc-500 text-sm">Run analysis first.</p>}
+              </CardContent>
+            </Card>
+
+            <Card className="bg-zinc-900 border-zinc-800">
+              <CardHeader>
+                <CardTitle>Show vs tell</CardTitle>
+                <CardDescription>
+                  Concrete imagery vs abstract ideas, and which senses the writing reaches for.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {craft ? <DictionPanel craft={craft} /> : <p className="text-zinc-500 text-sm">Run analysis first.</p>}
+              </CardContent>
+            </Card>
+
             <div className="grid lg:grid-cols-2 gap-6">
               <Card className="bg-zinc-900 border-zinc-800">
                 <CardHeader>
@@ -217,6 +258,30 @@ export default function ExplorePage() {
                   </CardContent>
                 </Card>
               </div>
+            </div>
+
+            <div className="grid lg:grid-cols-2 gap-6">
+              <Card className="bg-zinc-900 border-zinc-800">
+                <CardHeader>
+                  <CardTitle>Speech acts</CardTitle>
+                  <CardDescription>
+                    What the lines are doing: questions, commands, promises, pleas, accusations…
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {craft ? <SpeechActsPanel craft={craft} /> : <p className="text-zinc-500 text-sm">Run analysis first.</p>}
+                </CardContent>
+              </Card>
+
+              <Card className="bg-zinc-900 border-zinc-800">
+                <CardHeader>
+                  <CardTitle>Verse vs chorus</CardTitle>
+                  <CardDescription>How the writing changes when the chorus hits.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {craft ? <SectionContrastPanel craft={craft} /> : <p className="text-zinc-500 text-sm">Run analysis first.</p>}
+                </CardContent>
+              </Card>
             </div>
 
             <Card className="bg-zinc-900 border-zinc-800">
@@ -253,6 +318,18 @@ export default function ExplorePage() {
                 </CardContent>
               </Card>
             </div>
+
+            <Card className="bg-zinc-900 border-zinc-800">
+              <CardHeader>
+                <CardTitle>Album barcode</CardTitle>
+                <CardDescription>
+                  Every song line by line — the emotional shape of the whole dataset in one image.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <AlbumBarcode tracks={barcode} />
+              </CardContent>
+            </Card>
 
             <Card className="bg-zinc-900 border-zinc-800">
               <CardHeader>

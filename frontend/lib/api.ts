@@ -68,6 +68,7 @@ export type Status = {
   track_count: number;
   last_analyzed: string | null;
   playlist_name: string | null;
+  image_url: string | null;
 };
 
 export const getSpotifyLoginUrl = () => `${API_BASE}/api/auth/spotify`;
@@ -148,12 +149,51 @@ export async function getSentimentHeatmap(): Promise<{ tracks: HeatmapTrack[] }>
   return fetchApi("/api/sentiment/heatmap");
 }
 
+export type SpeechAct = {
+  act: string;
+  count: number;
+  share: number;
+  examples: { line: string; title: string }[];
+};
+
+export type SectionStats = {
+  lines: number;
+  words: number;
+  valence: number;
+  diversity: number;
+  concreteness: number;
+  syllables_per_line: number;
+  words_per_line: number;
+} | null;
+
+export type SoundProfile = {
+  syllables_per_line?: number;
+  syllable_consistency?: number;
+  perfect_rhyme_density?: number;
+  slant_rhyme_density?: number;
+  internal_rhyme?: number;
+  alliteration?: number;
+  assonance?: number;
+  plosive_ratio?: number;
+  sibilant_ratio?: number;
+  soft_ratio?: number;
+  concreteness?: number;
+  pct_concrete?: number;
+  pct_abstract?: number;
+  sensory_per_100?: number;
+  sensory_totals?: Record<string, number>;
+};
+
 export type Craft = {
   has_data: boolean;
   signature_words?: { word: string; count: number; songs: number; ratio: number; score: number }[];
+  signature_baseline?: string;
   hooks?: { line: string; count: number; songs: number; example: string }[];
   rhyme_pairs?: { a: string; b: string; count: number }[];
   pov?: { i: number; you: number; we: number; they: number; total: number };
+  speech_acts?: { total_lines: number; acts: SpeechAct[] };
+  sound?: SoundProfile;
+  section_contrast?: { verse: SectionStats; chorus: SectionStats };
 };
 
 export async function getCraft(): Promise<Craft> {
@@ -166,6 +206,7 @@ export type TrackSummary = {
   title: string;
   artist: string;
   release_year: number | null;
+  album_image: string | null;
   has_lyrics: boolean;
   words: number;
   unique_words: number;
@@ -182,13 +223,23 @@ export async function getTracks(): Promise<{ tracks: TrackSummary[] }> {
   return fetchApi("/api/tracks");
 }
 
-export type TrackSection = { label: string; lines: string[]; words: number };
+export type TrackLine = {
+  text: string;
+  valence: number;
+  act: string;
+  rhyme_letter: string;
+  rhyme_kind: "perfect" | "slant" | null;
+  end_word: string;
+};
+
+export type TrackSection = { label: string; lines: TrackLine[]; words: number };
 
 export type TrackDetail = {
   id: number;
   title: string;
   artist: string;
   release_year: number | null;
+  album_image: string | null;
   metrics: {
     valence?: number;
     intensity?: number;
@@ -198,6 +249,13 @@ export type TrackDetail = {
     diversity?: number;
     repetition?: number;
     rhyme_density?: number;
+    perfect_rhyme_density?: number;
+    slant_rhyme_density?: number;
+    internal_rhyme?: number;
+    alliteration?: number;
+    assonance?: number;
+    syllables_per_line?: number;
+    concreteness?: number;
     words_per_line?: number;
   };
   sections: TrackSection[];
@@ -209,10 +267,16 @@ export async function getTrack(id: number): Promise<TrackDetail> {
   return fetchApi(`/api/track/${id}`);
 }
 
-export type WordStat = { count: number; songs: number; ratio: number };
+export type WordStat = { count: number; songs: number; ratio: number; conc?: number };
 
 export async function getWordStats(): Promise<{ words: Record<string, WordStat> }> {
   return fetchApi("/api/word-stats");
+}
+
+export type BarcodeTrack = { id: number; title: string; values: number[] };
+
+export async function getBarcode(): Promise<{ tracks: BarcodeTrack[] }> {
+  return fetchApi("/api/barcode");
 }
 
 export type TrendYear = {
@@ -249,6 +313,7 @@ export type Superlative = { title: string; artist: string; value: number } | nul
 export type Stats = {
   has_data: boolean;
   name?: string | null;
+  image_url?: string | null;
   track_count?: number;
   analyzed_count?: number;
   total_words?: number;

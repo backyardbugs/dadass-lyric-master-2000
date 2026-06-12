@@ -55,12 +55,192 @@ def _norm_line(line: str) -> str:
     return " ".join(_tokens(line))
 
 
+_phones_cache: dict[str, list[str] | None] = {}
+
+
+def _phones(word: str) -> list[str] | None:
+    """First CMU pronunciation as a phoneme list, cached."""
+    if word in _phones_cache:
+        return _phones_cache[word]
+    plist = pronouncing.phones_for_word(word)
+    result = plist[0].split() if plist else None
+    _phones_cache[word] = result
+    return result
+
+
 def _rhyme_part(word: str) -> str | None:
     phones = pronouncing.phones_for_word(word)
     if not phones:
         return None
     part = pronouncing.rhyming_part(phones[0])
     return part or None
+
+
+def _vowel_signature(rhyme_part: str | None) -> str | None:
+    """Vowel sounds of the rhyming part, stress stripped — the basis of slant rhyme."""
+    if not rhyme_part:
+        return None
+    vowels = [re.sub(r"\d", "", p) for p in rhyme_part.split() if p[-1].isdigit()]
+    return " ".join(vowels) or None
+
+
+def _syllables(word: str) -> int:
+    phones = _phones(word)
+    if phones:
+        return sum(1 for p in phones if p[-1].isdigit()) or 1
+    # Fallback heuristic: vowel groups
+    groups = re.findall(r"[aeiouy]+", word.lower())
+    return max(1, len(groups))
+
+
+_PLOSIVES = {"P", "B", "T", "D", "K", "G"}
+_SIBILANTS = {"S", "Z", "SH", "ZH", "CH", "JH"}
+_SOFT = {"L", "R", "M", "N", "NG", "W", "Y"}  # liquids, nasals, glides
+
+
+def end_rhyme_scheme(lines: list[str], window: int = 4) -> list[dict]:
+    """Per-line end-rhyme info: letter (A, B, ... shared by rhyming lines),
+    kind ('perfect' | 'slant' | None), and the end word.
+    Lines rhyme if their rhyming parts match exactly (perfect) or share the
+    same vowel sounds with different consonants (slant), within `window` lines."""
+    enders = []
+    for line in lines:
+        toks = _tokens(line)
+        w = toks[-1] if toks else ""
+        part = _rhyme_part(w) if w else None
+        enders.append({"word": w, "part": part, "sig": _vowel_signature(part)})
+
+    n = len(enders)
+    # Union lines that rhyme within the window
+    parent = list(range(n))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def union(i: int, j: int) -> None:
+        parent[find(i)] = find(j)
+
+    kinds: list[str | None] = [None] * n
+    for i in range(n):
+        ei = enders[i]
+        if not ei["sig"]:
+            continue
+        for j in range(i + 1, min(i + 1 + window, n)):
+            ej = enders[j]
+            if not ej["sig"] or ei["word"] == ej["word"]:
+                continue
+            if ei["part"] == ej["part"]:
+                union(i, j)
+                kinds[i] = kinds[i] or "perfect"
+                kinds[j] = kinds[j] or "perfect"
+            elif ei["sig"] == ej["sig"]:
+                union(i, j)
+                kinds[i] = kinds[i] or "slant"
+                kinds[j] = kinds[j] or "slant"
+
+    groups: dict[int, list[int]] = {}
+    for i in range(n):
+        groups.setdefault(find(i), []).append(i)
+    letters: dict[int, str] = {}
+    next_letter = 0
+    out = []
+    for i in range(n):
+        root = find(i)
+        letter = ""
+        if len(groups[root]) >= 2:
+            if root not in letters:
+                letters[root] = chr(ord("A") + (next_letter % 26))
+                next_letter += 1
+            letter = letters[root]
+        out.append({"word": enders[i]["word"], "letter": letter, "kind": kinds[i]})
+    return out
+
+
+def sound_metrics(lines: list[str]) -> dict:
+    """Sound-level craft metrics: syllables, slant/internal rhyme, alliteration,
+    assonance, phoneme texture."""
+    if not lines:
+        return {}
+    # Syllables per line
+    syl_counts = []
+    for line in lines:
+        toks = _tokens(line)
+        if toks:
+            syl_counts.append(sum(_syllables(w) for w in toks))
+    syl_mean = mean(syl_counts) if syl_counts else 0.0
+    syl_std = pstdev(syl_counts) if len(syl_counts) > 1 else 0.0
+
+    # End rhymes: perfect vs slant participation
+    scheme = end_rhyme_scheme(lines, window=2)
+    known = [s for s in scheme if s["word"] and _phones(s["word"])]
+    perfect = sum(1 for s in scheme if s["kind"] == "perfect")
+    slant = sum(1 for s in scheme if s["kind"] == "slant")
+    n_known = max(1, len(known))
+
+    # Internal rhyme: vowel-signature matches between non-identical words inside a line
+    internal_pairs = 0
+    total_words = 0
+    allit_lines = 0
+    assonance_scores = []
+    class_counts = {"plosive": 0, "sibilant": 0, "soft": 0, "other_consonant": 0}
+    for line in lines:
+        toks = [w for w in _tokens(line) if len(w) > 2]
+        total_words += len(toks)
+        sigs = []
+        initials = []
+        vowel_counts: Counter = Counter()
+        n_vowels = 0
+        for w in toks:
+            part = _rhyme_part(w)
+            sigs.append((w, _vowel_signature(part)))
+            phones = _phones(w)
+            if phones:
+                first = re.sub(r"\d", "", phones[0])
+                initials.append(first if not phones[0][-1].isdigit() else None)
+                for p in phones:
+                    base = re.sub(r"\d", "", p)
+                    if p[-1].isdigit():
+                        vowel_counts[base] += 1
+                        n_vowels += 1
+                    elif base in _PLOSIVES:
+                        class_counts["plosive"] += 1
+                    elif base in _SIBILANTS:
+                        class_counts["sibilant"] += 1
+                    elif base in _SOFT:
+                        class_counts["soft"] += 1
+                    else:
+                        class_counts["other_consonant"] += 1
+            else:
+                initials.append(None)
+        for a in range(len(sigs)):
+            for b in range(a + 1, len(sigs)):
+                if sigs[a][1] and sigs[a][1] == sigs[b][1] and sigs[a][0] != sigs[b][0]:
+                    internal_pairs += 1
+        # Alliteration: 2+ nearby words sharing an initial consonant sound
+        for a in range(len(initials) - 1):
+            windowed = [x for x in initials[a:a + 3] if x]
+            if len(windowed) >= 2 and len(set(windowed)) < len(windowed):
+                allit_lines += 1
+                break
+        if n_vowels >= 4 and vowel_counts:
+            assonance_scores.append(vowel_counts.most_common(1)[0][1] / n_vowels)
+
+    n_cons = sum(class_counts.values()) or 1
+    return {
+        "syllables_per_line": round(syl_mean, 2),
+        "syllable_consistency": round(max(0.0, 1 - (syl_std / syl_mean)) if syl_mean else 0.0, 3),
+        "perfect_rhyme_density": round(perfect / n_known, 4),
+        "slant_rhyme_density": round(slant / n_known, 4),
+        "internal_rhyme": round(internal_pairs / max(1, total_words), 4),
+        "alliteration": round(allit_lines / max(1, len(lines)), 4),
+        "assonance": round(mean(assonance_scores), 4) if assonance_scores else 0.0,
+        "plosive_ratio": round(class_counts["plosive"] / n_cons, 4),
+        "sibilant_ratio": round(class_counts["sibilant"] / n_cons, 4),
+        "soft_ratio": round(class_counts["soft"] / n_cons, 4),
+    }
 
 
 def rhyme_stats(lines: list[str], window: int = 2) -> tuple[float, list[tuple[str, str]]]:
@@ -119,7 +299,7 @@ def track_metrics(text: str | None) -> dict:
 
     pron = {k: sum(1 for t in tokens if t in group) for k, group in PRONOUN_GROUPS.items()}
 
-    return {
+    metrics = {
         "valence": round(valence, 4),
         "intensity": round(intensity, 4),
         "volatility": round(volatility, 4),
@@ -132,6 +312,167 @@ def track_metrics(text: str | None) -> dict:
         "rhyme_density": round(rhyme_density, 4),
         "pronouns": pron,
     }
+    metrics.update(sound_metrics(lines))
+    metrics.update(diction_metrics(text))
+    return metrics
+
+
+# ---------- Diction: concreteness & sensory language ----------
+
+_CONC_PATH = __import__("pathlib").Path(__file__).resolve().parent / "data" / "concreteness.tsv"
+_conc_dict: dict[str, float] | None = None
+
+
+def _concreteness_dict() -> dict[str, float]:
+    """Brysbaert et al. (2014) concreteness norms: 1 (abstract) .. 5 (concrete)."""
+    global _conc_dict
+    if _conc_dict is None:
+        d: dict[str, float] = {}
+        try:
+            with open(_CONC_PATH, encoding="utf-8") as f:
+                for line in f:
+                    parts = line.rstrip("\n").split("\t")
+                    if len(parts) == 2:
+                        try:
+                            d[parts[0]] = float(parts[1])
+                        except ValueError:
+                            pass
+        except OSError:
+            pass
+        _conc_dict = d
+    return _conc_dict
+
+
+def concreteness_for(word: str) -> float | None:
+    return _concreteness_dict().get(word)
+
+
+SENSORY_WORDS = {
+    "sight": {
+        "see", "saw", "seen", "look", "looked", "looking", "watch", "watched", "stare",
+        "staring", "eyes", "light", "dark", "darkness", "bright", "shine", "shining",
+        "glow", "glowing", "color", "colors", "red", "blue", "green", "white", "black",
+        "golden", "pale", "shadow", "shadows", "neon", "blinding", "glitter", "flash",
+        "mirror", "moonlight", "sunlight", "sunset", "sunrise", "sky", "stars",
+    },
+    "sound": {
+        "hear", "heard", "listen", "listening", "sound", "sounds", "loud", "quiet",
+        "silence", "silent", "scream", "screaming", "whisper", "whispering", "echo",
+        "ring", "ringing", "song", "singing", "sang", "noise", "hum", "humming",
+        "static", "thunder", "siren", "sirens", "radio", "music", "voice", "voices",
+    },
+    "touch": {
+        "touch", "touched", "feel", "felt", "hold", "holding", "held", "warm", "warmth",
+        "cold", "freezing", "burn", "burning", "soft", "rough", "skin", "hands",
+        "fingers", "arms", "shiver", "shaking", "trembling", "numb", "ache", "aching",
+        "breath", "breathing", "heartbeat", "squeeze", "pull", "push", "kiss", "kissed",
+    },
+    "taste": {
+        "taste", "tasted", "sweet", "bitter", "sour", "salt", "salty", "sugar", "honey",
+        "wine", "whiskey", "beer", "coffee", "cigarette", "cigarettes", "smoke", "drink",
+        "drinking", "drunk", "tongue", "lips", "mouth", "blood", "poison",
+    },
+    "smell": {
+        "smell", "smells", "scent", "perfume", "cologne", "gasoline", "smoky", "incense",
+        "fragrance", "stale", "fresh", "rot", "rotting", "musty",
+    },
+}
+
+
+def diction_metrics(text: str) -> dict:
+    """Concreteness profile and sensory-language counts."""
+    stop = _stopwords()
+    tokens = [w for w in _tokens(text) if w not in VOCALIZATIONS]
+    content = [w for w in tokens if w not in stop]
+    scores = [s for s in (concreteness_for(w) for w in content) if s is not None]
+    sensory = {k: sum(1 for w in tokens if w in words) for k, words in SENSORY_WORDS.items()}
+    n = max(1, len(tokens))
+    return {
+        "concreteness": round(mean(scores), 3) if scores else 0.0,
+        "pct_concrete": round(sum(1 for s in scores if s >= 4.0) / max(1, len(scores)), 4),
+        "pct_abstract": round(sum(1 for s in scores if s <= 2.5) / max(1, len(scores)), 4),
+        "sensory_per_100": round(sum(sensory.values()) / n * 100, 2),
+        "sensory": sensory,
+    }
+
+
+# ---------- Speech acts ----------
+
+_ACT_PATTERNS: list[tuple[str, re.Pattern]] = [
+    ("apology", re.compile(r"\b(i'?m sorry|sorry|forgive me|i apologi[sz]e|my fault)\b", re.I)),
+    ("promise", re.compile(r"\b(i('| wi)ll always|i('| wi)ll never|i swear|i promise|i('| wi)ll be there|never gonna|i won'?t ever|till the day i die)\b", re.I)),
+    ("plea", re.compile(r"\b(please|i('m| am) begg?ing|don'?t leave|don'?t go|stay with me|come back|i need you)\b", re.I)),
+    ("accusation", re.compile(r"\b(you never|you always|you lied|you don'?t even|how could you|you made me|it'?s your fault|you said you)\b", re.I)),
+    ("confession", re.compile(r"\b(i'?ve been|i never told|truth is|the truth is|i confess|i admit|honestly,? i|i gotta admit)\b", re.I)),
+]
+
+_QUESTION_STARTS = re.compile(
+    r"^(what|when|where|why|who|how|do|does|did|am|are|is|was|were|will|would|can|could|should|have|has|had)\s+(i|you|we|they|he|she|it|this|that)\b",
+    re.I,
+)
+
+_IMPERATIVE_STARTS = {
+    "come", "hold", "take", "tell", "let", "stop", "wait", "listen", "look", "remember",
+    "forget", "stay", "go", "run", "give", "leave", "save", "call", "say", "keep",
+    "close", "open", "turn", "wake", "don't", "dont", "put", "throw", "show", "kiss",
+    "drive", "meet", "bring", "follow", "breathe", "hang",
+}
+
+
+def classify_speech_act(line: str) -> str:
+    """Primary speech act of a lyric line, by transparent rules."""
+    stripped = line.strip()
+    lowered = stripped.lower()
+    for act, pattern in _ACT_PATTERNS:
+        if pattern.search(lowered):
+            return act
+    if stripped.endswith("?") or _QUESTION_STARTS.match(lowered):
+        return "question"
+    first = (_tokens(lowered) or [""])[0]
+    if first in _IMPERATIVE_STARTS or lowered.startswith("don't "):
+        return "command"
+    if stripped.endswith("!"):
+        return "exclamation"
+    return "statement"
+
+
+def speech_acts_profile(tracks: list[dict], text_key: str = "cleaned_lyrics", max_examples: int = 40) -> dict:
+    """Corpus speech-act counts with example lines per act."""
+    counts: Counter = Counter()
+    examples: dict[str, list[dict]] = {}
+    total = 0
+    for t in tracks:
+        text = t.get(text_key) or t.get("raw_lyrics") or ""
+        seen_in_track: set[str] = set()
+        for line in _lines(text):
+            n = _norm_line(line)
+            if not n:
+                continue
+            act = classify_speech_act(line)
+            total += 1
+            counts[act] += 1
+            key = f"{act}:{n}"
+            if act != "statement" and key not in seen_in_track:
+                seen_in_track.add(key)
+                bucket = examples.setdefault(act, [])
+                if len(bucket) < max_examples and not any(e["line"].lower() == line.lower() for e in bucket):
+                    bucket.append({"line": line, "title": t.get("title") or ""})
+    return {
+        "total_lines": total,
+        "acts": [
+            {
+                "act": act,
+                "count": counts[act],
+                "share": round(counts[act] / max(1, total), 4),
+                "examples": examples.get(act, []),
+            }
+            for act, _ in counts.most_common()
+        ],
+    }
+
+
+def line_valence(line: str) -> float:
+    return _vader.polarity_scores(line)["compound"]
 
 
 # ---------- Corpus-level craft analysis ----------
@@ -146,10 +487,8 @@ def _stopwords() -> set[str]:
     return set(stopwords.words("english"))
 
 
-def signature_words(tracks: list[dict], text_key: str = "cleaned_lyrics", top: int = 30) -> list[dict]:
-    """Words this corpus uses far more than everyday English.
-    Score = log10 ratio of corpus rate (per billion words) to wordfreq's
-    general-English rate. Filtered to words used in 2+ songs."""
+def _corpus_counts(tracks: list[dict], text_key: str = "cleaned_lyrics") -> tuple[Counter, Counter]:
+    """(word counts, song spread) for content words, vocalizations excluded."""
     stop = _stopwords() | VOCALIZATIONS
     counts: Counter = Counter()
     song_spread: Counter = Counter()
@@ -158,29 +497,111 @@ def signature_words(tracks: list[dict], text_key: str = "cleaned_lyrics", top: i
         toks = [w for w in _tokens(text) if w not in stop and len(w) > 2 and "'" not in w]
         counts.update(toks)
         song_spread.update(set(toks))
+    return counts, song_spread
 
+
+def signature_words(
+    tracks: list[dict],
+    text_key: str = "cleaned_lyrics",
+    top: int = 30,
+    baseline_counts: Counter | None = None,
+) -> dict:
+    """Words this corpus over-uses. If baseline_counts (word counts from other
+    lyrics) is provided and substantial, rank by log-odds with an informative
+    Dirichlet prior (Monroe et al.) against that lyrics baseline — this filters
+    out generic 'song words'. Otherwise fall back to comparing against
+    general-English frequencies (wordfreq)."""
+    counts, song_spread = _corpus_counts(tracks, text_key)
     total = sum(counts.values())
     if total == 0:
-        return []
+        return {"baseline": "none", "words": []}
     min_count = max(3, total // 4000)
+
+    use_lyrics_baseline = baseline_counts is not None and sum(baseline_counts.values()) >= 20000
     out = []
-    for word, c in counts.items():
-        if c < min_count or song_spread[word] < 2:
-            continue
-        corpus_zipf = math.log10(c / total * 1e9)
-        eng_zipf = zipf_frequency(word, "en")
-        if eng_zipf == 0:
-            eng_zipf = 1.5  # very rare in general English
-        score = corpus_zipf - eng_zipf
-        out.append({
-            "word": word,
-            "count": c,
-            "songs": song_spread[word],
-            "ratio": round(10 ** score, 1),
-            "score": round(score, 3),
-        })
+    if use_lyrics_baseline:
+        bg_total = sum(baseline_counts.values())
+        prior_total = 500.0  # strength of the prior, in pseudo-words
+        for word, c in counts.items():
+            if c < min_count or song_spread[word] < 2:
+                continue
+            a_w = prior_total * (baseline_counts[word] + 0.5) / bg_total
+            y1, n1 = c, total
+            y2, n2 = baseline_counts[word], bg_total
+            d = math.log((y1 + a_w) / (n1 + prior_total - y1 - a_w)) - math.log(
+                (y2 + a_w) / (n2 + prior_total - y2 - a_w)
+            )
+            var = 1.0 / (y1 + a_w) + 1.0 / (y2 + a_w)
+            z = d / math.sqrt(var)
+            rate1 = c / total
+            rate2 = (y2 + 0.5) / bg_total
+            out.append({
+                "word": word,
+                "count": c,
+                "songs": song_spread[word],
+                "ratio": round(rate1 / rate2, 1),
+                "score": round(z, 3),
+            })
+    else:
+        for word, c in counts.items():
+            if c < min_count or song_spread[word] < 2:
+                continue
+            corpus_zipf = math.log10(c / total * 1e9)
+            eng_zipf = zipf_frequency(word, "en")
+            if eng_zipf == 0:
+                eng_zipf = 1.5  # very rare in general English
+            score = corpus_zipf - eng_zipf
+            out.append({
+                "word": word,
+                "count": c,
+                "songs": song_spread[word],
+                "ratio": round(10 ** score, 1),
+                "score": round(score, 3),
+            })
     out.sort(key=lambda x: x["score"], reverse=True)
-    return out[:top]
+    return {
+        "baseline": "other artists you've fetched" if use_lyrics_baseline else "everyday English",
+        "words": out[:top],
+    }
+
+
+def section_contrast(tracks: list[dict]) -> dict:
+    """Verse vs chorus craft comparison across the corpus."""
+    buckets: dict[str, dict] = {
+        "verse": {"lines": [], "tokens": []},
+        "chorus": {"lines": [], "tokens": []},
+    }
+    for t in tracks:
+        st = song_structure(t.get("raw_lyrics"), t.get("cleaned_lyrics"))
+        for s in st.get("sections", []):
+            base = s["label"].split(" ")[0].lower()
+            key = "chorus" if base == "chorus" else ("verse" if base in ("verse", "song") else None)
+            if key is None:
+                continue
+            buckets[key]["lines"].extend(s["lines"])
+            buckets[key]["tokens"].extend(_tokens(" ".join(s["lines"])))
+
+    out = {}
+    stop = _stopwords()
+    for key, b in buckets.items():
+        lines, tokens = b["lines"], b["tokens"]
+        if not lines or not tokens:
+            out[key] = None
+            continue
+        compounds = [line_valence(l) for l in lines]
+        content = [w for w in tokens if w not in stop and w not in VOCALIZATIONS]
+        scores = [s for s in (concreteness_for(w) for w in content) if s is not None]
+        syls = [sum(_syllables(w) for w in _tokens(l)) for l in lines if _tokens(l)]
+        out[key] = {
+            "lines": len(lines),
+            "words": len(tokens),
+            "valence": round(mean(compounds), 4),
+            "diversity": round(len(set(content)) / max(1, len(content)), 4),
+            "concreteness": round(mean(scores), 3) if scores else 0.0,
+            "syllables_per_line": round(mean(syls), 2) if syls else 0.0,
+            "words_per_line": round(len(tokens) / len(lines), 2),
+        }
+    return out
 
 
 def corpus_hooks(tracks: list[dict], text_key: str = "cleaned_lyrics", top: int = 12) -> list[dict]:

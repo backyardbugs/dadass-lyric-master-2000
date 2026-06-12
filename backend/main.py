@@ -25,12 +25,19 @@ from backend.cleaner import clean_lyrics
 from backend.fetch import _TokenAuth, extract_spotify_ref, fetch_source
 from backend.analyze import tokenize_lyrics, top_n_words, build_word_contexts
 from backend.nlp import (
+    _corpus_counts,
+    classify_speech_act,
+    concreteness_for,
     corpus_hooks,
     corpus_rhyme_pairs,
+    end_rhyme_scheme,
+    line_valence,
     pov_profile,
     run_topics,
+    section_contrast,
     signature_words,
     song_structure,
+    speech_acts_profile,
     top_n_by_pos,
     track_metrics,
 )
@@ -194,7 +201,13 @@ def api_fetch(body: FetchRequest, request: Request):
     kind, source_id = ref
     spotify_token = _get_spotify_token_from_request(request)
     try:
-        kind, source_id, source_name, raw_tracks = fetch_source(body.playlist_url, spotify_access_token=spotify_token)
+        known_lyrics = db.get_known_lyrics()
+    except Exception:
+        known_lyrics = {}
+    try:
+        kind, source_id, source_name, source_image, raw_tracks = fetch_source(
+            body.playlist_url, spotify_access_token=spotify_token, known_lyrics=known_lyrics
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:
@@ -249,7 +262,7 @@ def api_fetch(body: FetchRequest, request: Request):
     for t in raw_tracks:
         t["raw_lyrics"] = t.get("lyrics")
         t["cleaned_lyrics"] = clean_lyrics(t.get("lyrics")) if t.get("lyrics") else None
-    playlist_pk = db.insert_playlist(source_id, name=source_name)
+    playlist_pk = db.insert_playlist(source_id, name=source_name, image_url=source_image)
     db.insert_tracks(playlist_pk, raw_tracks)
     with_lyrics = sum(1 for t in raw_tracks if t.get("lyrics"))
     label = f" from {source_name}" if source_name else ""
@@ -303,7 +316,7 @@ def api_analyze():
         pass
 
     try:
-        by_pos = top_n_by_pos(tracks, text_key=text_key, n=30)
+        by_pos = top_n_by_pos(tracks, text_key=text_key, n=500)
         for pos_name, pairs in by_pos.items():
             db.insert_word_frequencies(run_id, pairs, pos=pos_name)
     except Exception:
@@ -332,6 +345,7 @@ class StatusResponse(BaseModel):
     track_count: int
     last_analyzed: str | None
     playlist_name: str | None = None
+    image_url: str | None = None
 
 
 @app.get("/api/status", response_model=StatusResponse)
@@ -355,6 +369,7 @@ def api_status():
         track_count=info["track_count"],
         last_analyzed=last_analyzed,
         playlist_name=info.get("name") or None,
+        image_url=info.get("image_url") or None,
     )
 
 
@@ -512,6 +527,7 @@ def api_stats():
     return {
         "has_data": True,
         "name": (info or {}).get("name") or None,
+        "image_url": (info or {}).get("image_url") or None,
         "track_count": len(tracks),
         "analyzed_count": n,
         "total_words": total_words,
@@ -536,10 +552,18 @@ def api_stats():
 _craft_cache: dict[int, dict] = {}
 
 
+_SOUND_AVG_KEYS = [
+    "syllables_per_line", "syllable_consistency", "perfect_rhyme_density",
+    "slant_rhyme_density", "internal_rhyme", "alliteration", "assonance",
+    "plosive_ratio", "sibilant_ratio", "soft_ratio",
+    "concreteness", "pct_concrete", "pct_abstract", "sensory_per_100",
+]
+
+
 @app.get("/api/craft")
 def api_craft():
-    """Craft analysis of the corpus: signature words (vs general English),
-    most repeated lines (hooks), most-used rhyme pairs, and point-of-view mix."""
+    """Craft analysis of the corpus: signature words, hooks, rhyme pairs,
+    point of view, speech acts, sound/diction profile, verse vs chorus contrast."""
     run_id = db.get_latest_run_id()
     playlist_pk = db.get_latest_playlist_id()
     if playlist_pk is None:
@@ -550,12 +574,36 @@ def api_craft():
     tracks = db.get_tracks(playlist_pk)
     if not tracks:
         return {"has_data": False}
+
+    # Lyrics baseline from every other dataset fetched into this DB
+    baseline_tracks = db.get_baseline_tracks(playlist_pk)
+    baseline_counts, _ = _corpus_counts(baseline_tracks) if baseline_tracks else (None, None)
+    sig = signature_words(tracks, baseline_counts=baseline_counts)
+
+    # Corpus sound/diction averages from stored per-track metrics
+    with_metrics = [t["metrics"] for t in tracks if t.get("metrics")]
+    sound = {}
+    if with_metrics:
+        for key in _SOUND_AVG_KEYS:
+            vals = [m.get(key) for m in with_metrics if m.get(key) is not None]
+            if vals:
+                sound[key] = round(sum(vals) / len(vals), 4)
+        sensory_totals: dict[str, int] = {}
+        for m in with_metrics:
+            for k, v in (m.get("sensory") or {}).items():
+                sensory_totals[k] = sensory_totals.get(k, 0) + v
+        sound["sensory_totals"] = sensory_totals
+
     result = {
         "has_data": True,
-        "signature_words": signature_words(tracks),
+        "signature_words": sig["words"],
+        "signature_baseline": sig["baseline"],
         "hooks": corpus_hooks(tracks),
         "rhyme_pairs": corpus_rhyme_pairs(tracks),
         "pov": pov_profile(tracks),
+        "speech_acts": speech_acts_profile(tracks),
+        "sound": sound,
+        "section_contrast": section_contrast(tracks),
     }
     _craft_cache.clear()
     _craft_cache[cache_key] = result
@@ -580,6 +628,7 @@ def api_tracks():
             "title": t["title"],
             "artist": t["artist"],
             "release_year": t.get("release_year"),
+            "album_image": t.get("album_image"),
             "has_lyrics": has_lyrics,
             "words": m.get("words", 0),
             "unique_words": m.get("unique_words", 0),
@@ -596,7 +645,8 @@ def api_tracks():
 
 @app.get("/api/track/{track_id}")
 def api_track(track_id: int):
-    """One track: metrics plus lyrics split into labeled sections."""
+    """One track: metrics plus lyrics split into labeled sections, with per-line
+    data: tone, rhyme-scheme letter (perfect/slant), and speech act."""
     playlist_pk = db.get_latest_playlist_id()
     if playlist_pk is None:
         raise HTTPException(status_code=404, detail="No data.")
@@ -605,13 +655,36 @@ def api_track(track_id: int):
     if t is None:
         raise HTTPException(status_code=404, detail="Track not found.")
     st = song_structure(t.get("raw_lyrics"), t.get("cleaned_lyrics"))
+    sections = st.get("sections", [])
+
+    # Per-line annotations over the whole song so rhyme letters span sections
+    all_lines = [line for s in sections for line in s["lines"]]
+    scheme = end_rhyme_scheme(all_lines)
+    idx = 0
+    annotated_sections = []
+    for s in sections:
+        line_data = []
+        for line in s["lines"]:
+            r = scheme[idx] if idx < len(scheme) else {"letter": "", "kind": None, "word": ""}
+            line_data.append({
+                "text": line,
+                "valence": round(line_valence(line), 3),
+                "act": classify_speech_act(line),
+                "rhyme_letter": r["letter"],
+                "rhyme_kind": r["kind"],
+                "end_word": r["word"],
+            })
+            idx += 1
+        annotated_sections.append({"label": s["label"], "words": s["words"], "lines": line_data})
+
     return {
         "id": t["id"],
         "title": t["title"],
         "artist": t["artist"],
         "release_year": t.get("release_year"),
+        "album_image": t.get("album_image"),
         "metrics": t.get("metrics") or {},
-        "sections": st.get("sections", []),
+        "sections": annotated_sections,
         "summary": st.get("summary", ""),
         "chorus_share": st.get("chorus_share", 0),
     }
@@ -648,14 +721,47 @@ def api_word_stats():
     for w, c in counts.items():
         corpus_zipf = math.log10(c / total * 1e9)
         eng = zipf_frequency(w, "en") or 1.5
-        words[w] = {
+        entry = {
             "count": c,
             "songs": songs.get(w, 0),
             "ratio": round(10 ** (corpus_zipf - eng), 1),
         }
+        conc = concreteness_for(w)
+        if conc is not None:
+            entry["conc"] = round(conc, 2)
+        words[w] = entry
     result = {"words": words}
     _word_stats_cache.clear()
     _word_stats_cache[playlist_pk] = result
+    return result
+
+
+_barcode_cache: dict[int, dict] = {}
+
+
+@app.get("/api/barcode")
+def api_barcode():
+    """Per-track, per-line tone values for the album barcode visualization."""
+    playlist_pk = db.get_latest_playlist_id()
+    if playlist_pk is None:
+        return {"tracks": []}
+    if playlist_pk in _barcode_cache:
+        return _barcode_cache[playlist_pk]
+    tracks = db.get_tracks(playlist_pk)
+    out = []
+    for t in tracks:
+        text = t.get("cleaned_lyrics") or t.get("raw_lyrics") or ""
+        lines = [l.strip() for l in text.split("\n") if l.strip()]
+        if not lines:
+            continue
+        out.append({
+            "id": t["id"],
+            "title": t["title"],
+            "values": [round(line_valence(l), 3) for l in lines],
+        })
+    result = {"tracks": out}
+    _barcode_cache.clear()
+    _barcode_cache[playlist_pk] = result
     return result
 
 

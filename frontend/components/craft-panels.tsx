@@ -32,17 +32,19 @@ export function SignatureWords({
                 style={{ width: `${Math.max(4, (w.score / maxScore) * 100)}%` }}
               />
             </div>
-            <span className="w-48 shrink-0 text-xs text-zinc-500">
-              <span className="font-mono text-zinc-300">{w.ratio >= 100 ? Math.round(w.ratio) : w.ratio}×</span> vs
-              everyday English · {w.songs} song{w.songs === 1 ? "" : "s"}
+            <span className="w-52 shrink-0 text-xs text-zinc-500">
+              <span className="font-mono text-zinc-300">{w.ratio >= 100 ? Math.round(w.ratio) : w.ratio}×</span> vs{" "}
+              {craft.signature_baseline ?? "everyday English"} · {w.songs} song{w.songs === 1 ? "" : "s"}
             </span>
           </li>
         ))}
       </ul>
       <p className="text-[11px] text-zinc-600 mt-3">
-        &ldquo;28× vs everyday English&rdquo; means the word shows up 28 times more often in these lyrics than
-        in ordinary written English — a deliberate word choice, not background vocabulary. Click a word
-        to see every line it appears in.
+        &ldquo;28×&rdquo; means the word shows up 28 times more often here than in the comparison corpus
+        ({craft.signature_baseline ?? "everyday English"}) — a deliberate word choice, not background
+        vocabulary. The comparison automatically switches to other artists you&apos;ve fetched once
+        enough lyrics accumulate, which filters out generic song words. Click a word to see every line
+        it appears in.
       </p>
     </div>
   );

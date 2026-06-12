@@ -1,18 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-
-const LEVELS: { min: number; label: string }[] = [
-  { min: 0.15, label: "Bright" },
-  { min: 0.05, label: "Warm" },
-  { min: -0.05, label: "Mixed" },
-  { min: -0.15, label: "Somber" },
-  { min: -1, label: "Dark" },
-];
-
-function levelFor(valence: number) {
-  return LEVELS.find((l) => valence >= l.min) ?? LEVELS[LEVELS.length - 1];
-}
+import { brightness, heat, whiplash, brightnessLabel } from "@/lib/tone";
 
 function polar(cx: number, cy: number, r: number, deg: number) {
   const rad = ((deg - 180) * Math.PI) / 180;
@@ -26,8 +15,6 @@ function arcPath(cx: number, cy: number, r: number, startDeg: number, endDeg: nu
   return `M ${s.x.toFixed(2)} ${s.y.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${e.x.toFixed(2)} ${e.y.toFixed(2)}`;
 }
 
-/** Valence gauge: -1 (dark) .. +1 (bright). Typical lyric corpora sit within
- * ±0.3, so the dial spans -0.4..0.4 for readability. */
 export function MoodMeter({
   valence,
   intensity,
@@ -37,22 +24,19 @@ export function MoodMeter({
   intensity: number;
   volatility: number;
 }) {
-  const SPAN = 0.4;
-  const frac = Math.max(0, Math.min(1, (valence + SPAN) / (2 * SPAN)));
-  const level = levelFor(valence);
-
-  const [shown, setShown] = useState(0.5);
+  const b = brightness(valence);
+  const [shown, setShown] = useState(50);
   useEffect(() => {
-    const t = setTimeout(() => setShown(frac), 150);
+    const t = setTimeout(() => setShown(b), 150);
     return () => clearTimeout(t);
-  }, [frac]);
+  }, [b]);
 
   const W = 260;
   const H = 150;
   const CX = W / 2;
   const CY = 130;
   const R = 100;
-  const needleDeg = shown * 180;
+  const needleDeg = (shown / 100) * 180;
   const tip = polar(CX, CY, R - 18, needleDeg);
 
   return (
@@ -87,38 +71,39 @@ export function MoodMeter({
         <circle cx={CX} cy={CY} r={6} fill="#fafafa" />
       </svg>
       <p className="text-4xl font-black tracking-tight -mt-2">
-        {valence >= 0 ? "+" : ""}
-        {valence.toFixed(2)}
+        {b}
+        <span className="text-base font-medium text-zinc-500"> / 100</span>
       </p>
       <p className="mt-1 text-lg font-bold bg-gradient-to-r from-indigo-400 via-zinc-300 to-amber-400 bg-clip-text text-transparent">
-        {level.label}
+        {brightnessLabel(b)}
       </p>
       <div className="grid grid-cols-2 gap-3 mt-4 w-full max-w-[260px] text-center">
         <div className="rounded-lg border border-zinc-800 p-2">
-          <p className="text-lg font-bold">{(intensity * 100).toFixed(0)}%</p>
-          <p className="text-[11px] text-zinc-500">intensity</p>
+          <p className="text-lg font-bold">{heat(intensity)}<span className="text-xs text-zinc-600">/100</span></p>
+          <p className="text-[11px] text-zinc-500">heat</p>
         </div>
         <div className="rounded-lg border border-zinc-800 p-2">
-          <p className="text-lg font-bold">{(volatility * 100).toFixed(0)}%</p>
-          <p className="text-[11px] text-zinc-500">volatility</p>
+          <p className="text-lg font-bold">{whiplash(volatility)}<span className="text-xs text-zinc-600">/100</span></p>
+          <p className="text-[11px] text-zinc-500">whiplash</p>
         </div>
       </div>
       <div className="text-zinc-500 text-[11px] mt-4 space-y-1.5 max-w-[270px]">
         <p>
-          <span className="text-zinc-300 font-semibold">Valence</span> — does the language read
-          positive or negative? &ldquo;I love it here&rdquo; scores high; &ldquo;everything is
-          ruined&rdquo; scores low. 0 is neutral.
+          <span className="text-zinc-300 font-semibold">Brightness</span> — does the language read
+          positive or negative? 50 is neutral; &ldquo;I love it here&rdquo; pushes up,
+          &ldquo;everything is ruined&rdquo; pushes down.
         </p>
         <p>
-          <span className="text-zinc-300 font-semibold">Intensity</span> — how emotionally charged
-          the wording is, in either direction. Plain description scores near 0.
+          <span className="text-zinc-300 font-semibold">Heat</span> — how emotionally charged the
+          wording is, in either direction. Plain description scores near 0.
         </p>
         <p>
-          <span className="text-zinc-300 font-semibold">Volatility</span> — how hard the tone swings
-          from one line to the next. High = whiplash between bright and dark lines.
+          <span className="text-zinc-300 font-semibold">Whiplash</span> — how hard the tone swings
+          from one line to the next. High = bright and dark lines side by side.
         </p>
         <p className="text-zinc-600">
-          Each lyric line is scored −1…+1 with the VADER sentiment model, then averaged per song.
+          Every lyric line is scored by the VADER sentiment model, then averaged per song and
+          rescaled to 0–100.
         </p>
       </div>
     </div>
