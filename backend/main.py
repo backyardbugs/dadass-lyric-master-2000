@@ -25,7 +25,10 @@ from backend.cleaner import clean_lyrics
 from backend.fetch import _TokenAuth, extract_spotify_ref, fetch_source
 from backend.analyze import tokenize_lyrics, top_n_words, build_word_contexts
 from backend.nlp import (
+    GENERIC_INDEFINITES,
+    VOCALIZATIONS,
     _corpus_counts,
+    _stopwords,
     classify_speech_act,
     concreteness_for,
     corpus_hooks,
@@ -661,6 +664,7 @@ def api_track(track_id: int):
     all_lines = [line for s in sections for line in s["lines"]]
     scheme = end_rhyme_scheme(all_lines)
     idx = 0
+    prev_line: str | None = None
     annotated_sections = []
     for s in sections:
         line_data = []
@@ -669,11 +673,12 @@ def api_track(track_id: int):
             line_data.append({
                 "text": line,
                 "valence": round(line_valence(line), 3),
-                "act": classify_speech_act(line),
+                "act": classify_speech_act(line, prev_line=prev_line),
                 "rhyme_letter": r["letter"],
                 "rhyme_kind": r["kind"],
                 "end_word": r["word"],
             })
+            prev_line = line
             idx += 1
         annotated_sections.append({"label": s["label"], "words": s["words"], "lines": line_data})
 
@@ -717,6 +722,9 @@ def api_word_stats():
         for w in set(toks):
             songs[w] = songs.get(w, 0) + 1
     total = sum(counts.values()) or 1
+    # Pronouns/function words and generic indefinites are rated by the norms but
+    # don't function as imagery — leave their concreteness out of the lens.
+    no_conc = _stopwords() | GENERIC_INDEFINITES | VOCALIZATIONS
     words = {}
     for w, c in counts.items():
         corpus_zipf = math.log10(c / total * 1e9)
@@ -726,9 +734,10 @@ def api_word_stats():
             "songs": songs.get(w, 0),
             "ratio": round(10 ** (corpus_zipf - eng), 1),
         }
-        conc = concreteness_for(w)
-        if conc is not None:
-            entry["conc"] = round(conc, 2)
+        if w not in no_conc:
+            conc = concreteness_for(w)
+            if conc is not None:
+                entry["conc"] = round(conc, 2)
         words[w] = entry
     result = {"words": words}
     _word_stats_cache.clear()

@@ -343,8 +343,45 @@ def _concreteness_dict() -> dict[str, float]:
     return _conc_dict
 
 
+_IRREGULAR_LEMMAS = {
+    "feet": "foot", "teeth": "tooth", "men": "man", "women": "woman",
+    "children": "child", "mice": "mouse", "geese": "goose", "leaves": "leaf",
+    "knives": "knife", "wives": "wife", "lives": "life", "selves": "self",
+}
+
+
+def _lemma_candidates(w: str) -> list[str]:
+    """Cheap morphology so 'feet', 'burning', 'cried' find their lemma's rating."""
+    out = []
+    if w in _IRREGULAR_LEMMAS:
+        out.append(_IRREGULAR_LEMMAS[w])
+    if w.endswith("ies") and len(w) > 4:
+        out.append(w[:-3] + "y")
+    if w.endswith("es") and len(w) > 3:
+        out.append(w[:-2])
+    if w.endswith("s") and len(w) > 3:
+        out.append(w[:-1])
+    if w.endswith("ing") and len(w) > 5:
+        out.extend([w[:-3], w[:-3] + "e"])
+        if len(w) > 6 and w[-4] == w[-5]:
+            out.append(w[:-4])
+    if w.endswith("ed") and len(w) > 4:
+        out.extend([w[:-2], w[:-1]])
+        if len(w) > 5 and w[-3] == w[-4]:
+            out.append(w[:-3])
+    if w.endswith("ied") and len(w) > 4:
+        out.append(w[:-3] + "y")
+    return out
+
+
 def concreteness_for(word: str) -> float | None:
-    return _concreteness_dict().get(word)
+    d = _concreteness_dict()
+    if word in d:
+        return d[word]
+    for cand in _lemma_candidates(word):
+        if cand in d:
+            return d[cand]
+    return None
 
 
 SENSORY_WORDS = {
@@ -379,11 +416,21 @@ SENSORY_WORDS = {
 }
 
 
+# Generic person/thing words: rated "concrete" by the norms (raters picture a
+# person), but they function as abstractions in lyrics, not images.
+GENERIC_INDEFINITES = {
+    "somebody", "someone", "something", "somewhere", "anybody", "anyone",
+    "anything", "anywhere", "nobody", "nothing", "nowhere", "everybody",
+    "everyone", "everything", "everywhere", "thing", "things", "stuff",
+    "one", "ones", "way", "time", "times",
+}
+
+
 def diction_metrics(text: str) -> dict:
     """Concreteness profile and sensory-language counts."""
     stop = _stopwords()
     tokens = [w for w in _tokens(text) if w not in VOCALIZATIONS]
-    content = [w for w in tokens if w not in stop]
+    content = [w for w in tokens if w not in stop and w not in GENERIC_INDEFINITES]
     scores = [s for s in (concreteness_for(w) for w in content) if s is not None]
     sensory = {k: sum(1 for w in tokens if w in words) for k, words in SENSORY_WORDS.items()}
     n = max(1, len(tokens))
@@ -412,20 +459,66 @@ _QUESTION_STARTS = re.compile(
 )
 
 _IMPERATIVE_STARTS = {
-    "come", "hold", "take", "tell", "let", "stop", "wait", "listen", "look", "remember",
-    "forget", "stay", "go", "run", "give", "leave", "save", "call", "say", "keep",
+    # High-precision imperative openers only. "remember"/"forget" are deliberately
+    # excluded: in lyrics they're overwhelmingly recall ("...can't / Remember what it is"),
+    # not commands.
+    "come", "hold", "take", "tell", "let", "stop", "wait", "listen", "look",
+    "stay", "go", "run", "give", "leave", "save", "call", "say", "keep",
     "close", "open", "turn", "wake", "don't", "dont", "put", "throw", "show", "kiss",
     "drive", "meet", "bring", "follow", "breathe", "hang",
 }
 
+# A line ending in one of these is mid-sentence; the next line continues it.
+_CONTINUATION_ENDERS = {
+    "and", "but", "or", "so", "than", "like", "if", "when", "while", "then",
+    "cause", "'cause", "to", "of", "for", "with", "at", "on", "in", "by", "from",
+    "into", "over", "under", "through", "the", "a", "an", "my", "your", "his",
+    "her", "our", "their", "its", "that", "who", "which", "whom", "where",
+    "i'm", "you're", "we're", "they're", "i've", "i'll", "i'd", "not", "never",
+}
 
-def classify_speech_act(line: str) -> str:
-    """Primary speech act of a lyric line, by transparent rules."""
+_MODALS = {
+    "can", "can't", "cannot", "could", "couldn't", "will", "won't", "would",
+    "wouldn't", "should", "shouldn't", "must", "might", "may", "don't", "didn't",
+    "doesn't", "gonna", "wanna", "gotta", "tryna", "to",
+}
+
+
+def _dangling_clause(prev_line: str | None) -> bool:
+    """True when prev_line ends mid-sentence, so the next line is a continuation
+    (e.g. "But can't for the life of me / Remember what it is")."""
+    if not prev_line:
+        return False
+    toks = _tokens(prev_line)
+    if not toks:
+        return False
+    if toks[-1] in _CONTINUATION_ENDERS:
+        return True
+    # A modal/aux/"to" with no verb after it means its verb starts the next line.
+    last_modal = max((i for i, w in enumerate(toks) if w in _MODALS), default=-1)
+    if last_modal >= 0:
+        try:
+            nltk.data.find("taggers/averaged_perceptron_tagger_eng")
+        except LookupError:
+            nltk.download("averaged_perceptron_tagger_eng", quiet=True)
+        from nltk import pos_tag
+
+        tagged = pos_tag(toks[last_modal + 1:])
+        return not any(tag.startswith("VB") for _, tag in tagged)
+    return False
+
+
+def classify_speech_act(line: str, prev_line: str | None = None) -> str:
+    """Primary speech act of a lyric line, by transparent rules.
+    Lines that continue the previous line's sentence are not classified as
+    questions/commands — lyrics spread sentences across lines."""
     stripped = line.strip()
     lowered = stripped.lower()
     for act, pattern in _ACT_PATTERNS:
         if pattern.search(lowered):
             return act
+    if _dangling_clause(prev_line):
+        return "statement"
     if stripped.endswith("?") or _QUESTION_STARTS.match(lowered):
         return "question"
     first = (_tokens(lowered) or [""])[0]
@@ -444,11 +537,13 @@ def speech_acts_profile(tracks: list[dict], text_key: str = "cleaned_lyrics", ma
     for t in tracks:
         text = t.get(text_key) or t.get("raw_lyrics") or ""
         seen_in_track: set[str] = set()
+        prev: str | None = None
         for line in _lines(text):
             n = _norm_line(line)
             if not n:
                 continue
-            act = classify_speech_act(line)
+            act = classify_speech_act(line, prev_line=prev)
+            prev = line
             total += 1
             counts[act] += 1
             key = f"{act}:{n}"
@@ -589,7 +684,7 @@ def section_contrast(tracks: list[dict]) -> dict:
             out[key] = None
             continue
         compounds = [line_valence(l) for l in lines]
-        content = [w for w in tokens if w not in stop and w not in VOCALIZATIONS]
+        content = [w for w in tokens if w not in stop and w not in VOCALIZATIONS and w not in GENERIC_INDEFINITES]
         scores = [s for s in (concreteness_for(w) for w in content) if s is not None]
         syls = [sum(_syllables(w) for w in _tokens(l)) for l in lines if _tokens(l)]
         out[key] = {
