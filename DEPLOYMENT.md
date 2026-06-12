@@ -33,7 +33,7 @@ Alternatively, the repo now includes a root `vercel.json` that runs `cd frontend
 
 | Variable | Example |
 |---|---|
-| `NEXT_PUBLIC_API_URL` | `https://YOUR-SERVICE.onrender.com` |
+| `NEXT_PUBLIC_API_URL` | `https://dadass-lyric-master-2000-1.onrender.com` |
 | `SPOTIFY_CLIENT_ID` | (same as Spotify dashboard) |
 | `SPOTIFY_CLIENT_SECRET` | (same as Spotify dashboard) |
 | `SPOTIFY_REDIRECT_URI` | `https://frontend-woad-xi-34.vercel.app/api/auth/spotify/callback` |
@@ -76,9 +76,12 @@ If you only have an env group and no Web Service, Gemini vars never reach the ap
 5. Deploy → copy the service URL (e.g. `https://something.onrender.com`)
 6. Put that URL in Vercel as `NEXT_PUBLIC_API_URL`
 
-### Note on `dadass-lyric-master-2000.onrender.com`
+### Note on backend URL
 
-The codebase defaults to that URL. If you don't own that Render service, create your own and update `NEXT_PUBLIC_API_URL` on Vercel to match.
+Production backend: **https://dadass-lyric-master-2000-1.onrender.com**
+
+See `render.env.example` for every variable the Render service needs.
+See `vercel.env.example` for Vercel settings.
 
 ---
 

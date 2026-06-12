@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://dadass-lyric-master-2000.onrender.com";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://dadass-lyric-master-2000-1.onrender.com";
 
 let spotifyToken: string | null = null;
 if (typeof window !== "undefined") {

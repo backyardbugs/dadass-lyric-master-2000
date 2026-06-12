@@ -108,7 +108,7 @@ GENIUS_ACCESS_TOKEN=...
 
 1. Push the repo and import the project in [Vercel](https://vercel.com); set **Root Directory** to `frontend`.
 2. Add environment variables:
-   - `NEXT_PUBLIC_API_URL` = your backend URL (e.g. `https://dadass-lyric-master-2000.onrender.com`).
+   - `NEXT_PUBLIC_API_URL` = `https://dadass-lyric-master-2000-1.onrender.com`
    - For Spotify login: `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET` (same values as backend), and `SPOTIFY_REDIRECT_URI` = `https://YOUR_VERCEL_APP.vercel.app/api/auth/spotify/callback` (your frontend callback URL). Add that exact URL to your [Spotify app](https://developer.spotify.com/dashboard) Redirect URIs too.
 3. Deploy. Set the frontend URL as `CORS_ORIGINS` on the backend.
 
