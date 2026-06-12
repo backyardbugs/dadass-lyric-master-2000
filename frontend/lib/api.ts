@@ -1,4 +1,9 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://dadass-lyric-master-2000.onrender.com";
+// Empty string = same-origin (Next.js rewrites proxy to the backend).
+// Set NEXT_PUBLIC_API_URL only when you want the browser to call the backend directly.
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL === undefined
+    ? ""
+    : process.env.NEXT_PUBLIC_API_URL;
 
 let spotifyToken: string | null = null;
 if (typeof window !== "undefined") {
@@ -52,7 +57,10 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Network error";
     if (/failed to fetch|load failed|network error/i.test(msg)) {
-      throw new Error("Could not reach the server. If this keeps happening, the backend may be starting up (try again in 30 seconds).");
+      const target = API_BASE || "(same-origin proxy → backend)";
+      throw new Error(
+        `Could not reach the API at ${target}. Make sure the backend is running (uvicorn on port 8000), then hard-refresh.`,
+      );
     }
     throw e;
   }
