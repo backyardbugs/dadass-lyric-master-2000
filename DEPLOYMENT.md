@@ -18,16 +18,17 @@ You in the browser
 - **Your URL:** https://frontend-woad-xi-34.vercel.app
 - **Does NOT run:** Python, Gemini, SQLite, or lyric fetching
 
-### Fix the Vercel build error (`package.json` not found)
+### Fix Vercel build errors (`package.json` / Next.js not found)
 
-Vercel is building from the repo root, but `package.json` lives in `frontend/`.
+The Next.js app lives in `frontend/`. Vercel must either build from that folder or use the repo root shim.
 
-**Do this in Vercel Dashboard → your project → Settings → General:**
+**Option A (recommended):** Vercel Dashboard → your project → **Settings → General → Root Directory** → set to `frontend` → Save → Redeploy.
 
-1. **Root Directory** → set to `frontend`
-2. Save, then redeploy
+**Option B (works without changing Root Directory):** Pull latest `main`. The repo includes:
+- Root `package.json` with `next` (so Vercel detects the framework)
+- Root `vercel.json` that runs `npm install` / `npm run build` in `frontend/`
 
-Alternatively, the repo now includes a root `vercel.json` that runs `cd frontend && npm install` — redeploy after pulling latest `main`.
+If you still see “No Next.js version detected”, confirm **Root Directory is blank** (repo root) when using Option B, or set it to `frontend` for Option A — do not mix both.
 
 ### Vercel environment variables
 
