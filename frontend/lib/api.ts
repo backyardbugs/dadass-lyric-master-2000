@@ -69,6 +69,7 @@ export type Status = {
   last_analyzed: string | null;
   playlist_name: string | null;
   image_url: string | null;
+  llm_available?: boolean;
 };
 
 export const getSpotifyLoginUrl = () => `${API_BASE}/api/auth/spotify`;
@@ -227,9 +228,26 @@ export type TrackLine = {
   text: string;
   valence: number;
   act: string;
+  act_source?: "llm" | "rules";
   rhyme_letter: string;
   rhyme_kind: "perfect" | "slant" | null;
   end_word: string;
+  line_index?: number;
+};
+
+export type TrackMetaphor = {
+  phrase: string;
+  source: string;
+  target: string;
+  line: number;
+  note: string;
+};
+
+export type TrackLlm = {
+  available: boolean;
+  summary: string;
+  metaphors: TrackMetaphor[];
+  imagery: Record<string, Record<string, string>>;
 };
 
 export type TrackSection = { label: string; lines: TrackLine[]; words: number };
@@ -261,6 +279,7 @@ export type TrackDetail = {
   sections: TrackSection[];
   summary: string;
   chorus_share: number;
+  llm?: TrackLlm;
 };
 
 export async function getTrack(id: number): Promise<TrackDetail> {
@@ -300,11 +319,13 @@ export async function getWordContext(word: string): Promise<{ word: string; cont
 export type Topic = {
   id: number;
   label: string;
+  description?: string;
+  keywords?: string[];
   topic_index: number;
   top_tracks: { title: string; artist: string; weight: number }[];
 };
 
-export async function getTopics(): Promise<{ topics: Topic[] }> {
+export async function getTopics(): Promise<{ topics: Topic[]; source?: "llm" | "nmf" | "none" }> {
   return fetchApi("/api/topics");
 }
 

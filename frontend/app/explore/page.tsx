@@ -48,6 +48,7 @@ export default function ExplorePage() {
   const [heatmapTracks, setHeatmapTracks] = useState<HeatmapTrack[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [topics, setTopics] = useState<Topic[]>([]);
+  const [topicsSource, setTopicsSource] = useState<string | undefined>();
   const [craft, setCraft] = useState<Craft | null>(null);
   const [trendYears, setTrendYears] = useState<TrendYear[]>([]);
   const [trackList, setTrackList] = useState<TrackSummary[]>([]);
@@ -77,6 +78,7 @@ export default function ExplorePage() {
       setHeatmapTracks(heatRes.status === "fulfilled" ? heatRes.value.tracks : []);
       setStats(statsRes.status === "fulfilled" && statsRes.value.has_data ? statsRes.value : null);
       setTopics(topicsRes.status === "fulfilled" ? topicsRes.value.topics : []);
+      setTopicsSource(topicsRes.status === "fulfilled" ? topicsRes.value.source : undefined);
       setCraft(craftRes.status === "fulfilled" && craftRes.value.has_data ? craftRes.value : null);
       setTrendYears(trendsRes.status === "fulfilled" ? trendsRes.value.years : []);
       setTrackList(tracksRes.status === "fulfilled" ? tracksRes.value.tracks : []);
@@ -335,12 +337,12 @@ export default function ExplorePage() {
               <CardHeader>
                 <CardTitle>Themes</CardTitle>
                 <CardDescription>
-                  Word groups that travel together across songs (TF-IDF + NMF), with the tracks that
-                  match each one most strongly.
+                  Recurring ideas across the dataset. With Gemini enabled, themes get human-readable
+                  names; otherwise TF-IDF + NMF word clusters.
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <TopicBubbles topics={topics} />
+                <TopicBubbles topics={topics} source={topicsSource} />
               </CardContent>
             </Card>
 
