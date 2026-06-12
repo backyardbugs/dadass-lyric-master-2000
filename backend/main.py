@@ -45,7 +45,6 @@ from backend.nlp import (
     track_metrics,
 )
 from backend import db
-from backend import llm as llm_module
 
 app = FastAPI(title="Dad Ass Lyric Analyzer 3000 API", version="0.1.0")
 
@@ -336,15 +335,6 @@ def api_analyze():
     except Exception:
         pass
 
-    # LLM corpus themes (Gemini) — human-readable theme names
-    if llm_module.is_available():
-        try:
-            themes = llm_module.analyze_corpus_themes(tracks)
-            if themes:
-                db.update_run_llm_themes(run_id, themes)
-        except Exception:
-            pass
-
     return AnalyzeResponse(
         ok=True,
         message="Analysis complete.",
@@ -359,7 +349,6 @@ class StatusResponse(BaseModel):
     last_analyzed: str | None
     playlist_name: str | None = None
     image_url: str | None = None
-    llm_available: bool = False
 
 
 @app.get("/api/status", response_model=StatusResponse)
@@ -384,7 +373,6 @@ def api_status():
         last_analyzed=last_analyzed,
         playlist_name=info.get("name") or None,
         image_url=info.get("image_url") or None,
-        llm_available=llm_module.is_available(),
     )
 
 
@@ -459,39 +447,10 @@ def api_word_context(word: str):
 
 @app.get("/api/topics")
 def api_topics():
-    """Return theme labels with top tracks. Prefers Gemini themes when available."""
+    """Return topic labels with the top tracks for each topic from the latest run."""
     run_id = db.get_latest_run_id()
     if run_id is None:
-        return {"topics": [], "source": "none"}
-    llm_themes = db.get_run_llm_themes(run_id)
-    if llm_themes:
-        playlist_pk = db.get_latest_playlist_id()
-        tracks = db.get_tracks(playlist_pk) if playlist_pk else []
-        by_id = {t["id"]: t for t in tracks}
-        topics = []
-        for th in llm_themes:
-            top_tracks = []
-            ids = th.get("track_ids") or []
-            n = max(1, len(ids))
-            for tid in ids[:5]:
-                t = by_id.get(tid)
-                if t:
-                    top_tracks.append({
-                        "title": t["title"],
-                        "artist": t["artist"],
-                        "weight": round(1.0 / n, 3),
-                    })
-            label = th.get("name") or " / ".join(th.get("keywords") or [])
-            topics.append({
-                "id": th.get("topic_index", 0),
-                "label": label,
-                "description": th.get("description") or "",
-                "keywords": th.get("keywords") or [],
-                "topic_index": th.get("topic_index", 0),
-                "top_tracks": top_tracks,
-            })
-        return {"topics": topics, "source": "llm"}
-
+        return {"topics": []}
     conn = db.get_connection()
     try:
         rows = conn.execute(
@@ -510,14 +469,12 @@ def api_topics():
             topics.append({
                 "id": r[0],
                 "label": r[1],
-                "description": "",
-                "keywords": r[1].split(" / ") if r[1] else [],
                 "topic_index": r[2],
                 "top_tracks": [
                     {"title": tr[0], "artist": tr[1], "weight": tr[2]} for tr in track_rows
                 ],
             })
-        return {"topics": topics, "source": "nmf"}
+        return {"topics": topics}
     finally:
         conn.close()
 
@@ -692,8 +649,7 @@ def api_tracks():
 @app.get("/api/track/{track_id}")
 def api_track(track_id: int):
     """One track: metrics plus lyrics split into labeled sections, with per-line
-    data: tone, rhyme-scheme letter (perfect/slant), and speech act.
-    Uses Gemini for section labels, sentence-aware speech acts, and metaphors when available."""
+    data: tone, rhyme-scheme letter (perfect/slant), and speech act."""
     playlist_pk = db.get_latest_playlist_id()
     if playlist_pk is None:
         raise HTTPException(status_code=404, detail="No data.")
@@ -701,32 +657,8 @@ def api_track(track_id: int):
     t = next((x for x in tracks if x["id"] == track_id), None)
     if t is None:
         raise HTTPException(status_code=404, detail="Track not found.")
-
-    text = t.get("cleaned_lyrics") or t.get("raw_lyrics") or ""
-    flat_lines = [l.strip() for l in text.split("\n") if l.strip()]
-
-    # Lazy LLM analysis — cached per track until lyrics change
-    track_llm = db.get_track_llm(track_id)
-    text_hash = llm_module.lyrics_hash("\n".join(flat_lines)) if flat_lines else ""
-    if flat_lines and llm_module.is_available():
-        if not track_llm or track_llm.get("hash") != text_hash:
-            fresh = llm_module.analyze_track(t["title"], t["artist"], flat_lines)
-            if fresh:
-                db.update_track_llm(track_id, fresh)
-                track_llm = fresh
-
-    if track_llm and track_llm.get("sections"):
-        raw_sections = llm_module.sections_from_llm(track_llm, flat_lines)
-        sections = [{"label": s["label"], "lines": s["lines"], "words": len(_WORD_RE.findall(" ".join(s["lines"]).lower()))} for s in raw_sections]
-        summary = " – ".join(s["label"] for s in sections)
-        chorus_words = sum(s["words"] for s in sections if s["label"].split(" ")[0].lower() == "chorus")
-        total_words = sum(s["words"] for s in sections) or 1
-        chorus_share = round(chorus_words / total_words, 3)
-    else:
-        st = song_structure(t.get("raw_lyrics"), t.get("cleaned_lyrics"))
-        sections = st.get("sections", [])
-        summary = st.get("summary", "")
-        chorus_share = st.get("chorus_share", 0)
+    st = song_structure(t.get("raw_lyrics"), t.get("cleaned_lyrics"))
+    sections = st.get("sections", [])
 
     # Per-line annotations over the whole song so rhyme letters span sections
     all_lines = [line for s in sections for line in s["lines"]]
@@ -738,21 +670,17 @@ def api_track(track_id: int):
         line_data = []
         for line in s["lines"]:
             r = scheme[idx] if idx < len(scheme) else {"letter": "", "kind": None, "word": ""}
-            rule_act = classify_speech_act(line, prev_line=prev_line)
-            act = llm_module.act_for_line(track_llm, idx, rule_act)
             line_data.append({
                 "text": line,
                 "valence": round(line_valence(line), 3),
-                "act": act,
-                "act_source": "llm" if track_llm and str(idx) in (track_llm.get("line_acts") or {}) else "rules",
+                "act": classify_speech_act(line, prev_line=prev_line),
                 "rhyme_letter": r["letter"],
                 "rhyme_kind": r["kind"],
                 "end_word": r["word"],
-                "line_index": idx,
             })
             prev_line = line
             idx += 1
-        annotated_sections.append({"label": s["label"], "words": s.get("words", 0), "lines": line_data})
+        annotated_sections.append({"label": s["label"], "words": s["words"], "lines": line_data})
 
     return {
         "id": t["id"],
@@ -762,14 +690,8 @@ def api_track(track_id: int):
         "album_image": t.get("album_image"),
         "metrics": t.get("metrics") or {},
         "sections": annotated_sections,
-        "summary": summary,
-        "chorus_share": chorus_share,
-        "llm": {
-            "available": bool(track_llm),
-            "summary": (track_llm or {}).get("summary") or "",
-            "metaphors": (track_llm or {}).get("metaphors") or [],
-            "imagery": (track_llm or {}).get("imagery") or {},
-        },
+        "summary": st.get("summary", ""),
+        "chorus_share": st.get("chorus_share", 0),
     }
 
 

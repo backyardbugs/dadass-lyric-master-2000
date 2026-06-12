@@ -18,7 +18,7 @@ type Lens = "plain" | "tone" | "concreteness" | "frequency";
 const LENSES: { key: Lens; label: string; hint: string }[] = [
   { key: "plain", label: "Plain", hint: "" },
   { key: "tone", label: "Tone", hint: "Line background: indigo = dark, amber = bright." },
-  { key: "concreteness", label: "Concrete vs abstract", hint: "Words colored by meaning in context (Gemini when available): green = concrete image, violet = abstract idea, gray = referential (you, somebody)." },
+  { key: "concreteness", label: "Concrete vs abstract", hint: "Words colored: green = concrete (things you can touch/see), violet = abstract (ideas)." },
   { key: "frequency", label: "Their favorites", hint: "Stronger pink = a word this writer uses more across the dataset." },
 ];
 
@@ -58,19 +58,11 @@ function concColor(conc: number | undefined): string | undefined {
   return undefined;
 }
 
-function imageryColor(role: string | undefined): string | undefined {
-  if (role === "concrete") return "#6ee7b7";
-  if (role === "abstract") return "#c4b5fd";
-  if (role === "referential") return "#71717a";
-  return undefined;
-}
-
 function HoverableLine({
   line,
   lens,
   stats,
   maxCount,
-  llmImagery,
   onHover,
   onWordClick,
 }: {
@@ -78,7 +70,6 @@ function HoverableLine({
   lens: Lens;
   stats: Record<string, WordStat>;
   maxCount: number;
-  llmImagery?: Record<string, string>;
   onHover: (word: string | null, x: number, y: number) => void;
   onWordClick?: (word: string) => void;
 }) {
@@ -91,8 +82,7 @@ function HoverableLine({
         if (!stat) return <span key={i}>{part}</span>;
         const style: React.CSSProperties = {};
         if (lens === "concreteness") {
-          const role = llmImagery?.[key];
-          const c = role ? imageryColor(role) : concColor(stat.conc);
+          const c = concColor(stat.conc);
           if (c) style.color = c;
         } else if (lens === "frequency" && stat.count >= 3) {
           const p = Math.log(stat.count) / Math.log(Math.max(2, maxCount));
@@ -285,29 +275,6 @@ export function TracksPanel({
                 )}
               </div>
               {open.summary && <p className="text-xs text-zinc-500 font-mono">{open.summary}</p>}
-              {open.llm?.summary && (
-                <p className="text-xs text-emerald-400/90 mt-1 leading-relaxed">{open.llm.summary}</p>
-              )}
-
-              {open.llm?.metaphors && open.llm.metaphors.length > 0 && (
-                <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3 my-2">
-                  <p className="text-[11px] uppercase tracking-widest text-zinc-500 mb-2">Metaphors &amp; images</p>
-                  <ul className="space-y-2">
-                    {open.llm.metaphors.map((m, i) => (
-                      <li key={i} className="text-xs text-zinc-300">
-                        <span className="text-rose-300 font-semibold">&ldquo;{m.phrase}&rdquo;</span>
-                        {m.source && m.target && (
-                          <span className="text-zinc-400">
-                            {" "}
-                            — {m.source} → {m.target}
-                          </span>
-                        )}
-                        {m.note && <span className="text-zinc-500 block mt-0.5">{m.note}</span>}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
 
               <div className="flex flex-wrap items-center gap-2 my-2">
                 <span className="text-[11px] uppercase tracking-widest text-zinc-500">view:</span>
@@ -337,10 +304,7 @@ export function TracksPanel({
                       <p className="text-[11px] uppercase tracking-widest text-rose-400/80 font-semibold mb-1">
                         {s.label} <span className="text-zinc-600 normal-case tracking-normal">· {s.words} words</span>
                       </p>
-                      {s.lines.map((line, j) => {
-                        const lineIdx = line.line_index ?? j;
-                        const llmImagery = open.llm?.imagery?.[String(lineIdx)];
-                        return (
+                      {s.lines.map((line, j) => (
                         <div
                           key={j}
                           className="flex items-baseline gap-2 rounded px-1 -mx-1"
@@ -352,15 +316,11 @@ export function TracksPanel({
                               lens={lens}
                               stats={wordStats}
                               maxCount={maxCount}
-                              llmImagery={llmImagery}
                               onHover={onHover}
                               onWordClick={onWordClick}
                             />
                             {line.act !== "statement" && (
-                              <span
-                                className={`ml-2 align-middle text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded ${ACT_STYLES[line.act] || "bg-zinc-700/40 text-zinc-400"}`}
-                                title={line.act_source === "llm" ? "Sentence-aware (Gemini)" : "Rule-based"}
-                              >
+                              <span className={`ml-2 align-middle text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded ${ACT_STYLES[line.act] || "bg-zinc-700/40 text-zinc-400"}`}>
                                 {line.act}
                               </span>
                             )}
@@ -375,7 +335,7 @@ export function TracksPanel({
                             </span>
                           )}
                         </div>
-                      );})}
+                      ))}
                     </div>
                   ))}
                   <p className="text-[11px] text-zinc-600">

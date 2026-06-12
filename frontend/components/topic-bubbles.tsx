@@ -11,68 +11,37 @@ const GRADIENTS = [
   "from-pink-500/20 to-rose-500/10 border-pink-500/30",
 ];
 
-export function TopicBubbles({ topics, source }: { topics: Topic[]; source?: string }) {
+export function TopicBubbles({ topics }: { topics: Topic[] }) {
   if (topics.length === 0)
-    return <p className="text-zinc-500 text-sm">No themes yet — run Analyze on a dataset with a few tracks.</p>;
-
-  const isLlm = source === "llm";
+    return <p className="text-zinc-500 text-sm">No topics yet — run Analyze on a dataset with a few tracks.</p>;
 
   return (
-    <div>
-      {isLlm && (
-        <p className="text-[11px] text-emerald-400/80 mb-3">
-          Gemini-read themes — named by what the writer keeps returning to, not just word clusters.
-        </p>
-      )}
-      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        {topics.map((topic, i) => (
-          <div
-            key={topic.id}
-            className={`rounded-xl border bg-gradient-to-br p-4 hover:-translate-y-0.5 transition-transform ${GRADIENTS[i % GRADIENTS.length]}`}
-          >
-            <p className="text-[11px] uppercase tracking-widest text-zinc-400 mb-2">
-              {isLlm ? "theme" : "topic"} #{topic.topic_index + 1}
-            </p>
-            {isLlm ? (
-              <>
-                <p className="text-base font-bold text-zinc-100 mb-1">{topic.label}</p>
-                {topic.description && (
-                  <p className="text-xs text-zinc-400 mb-2 leading-relaxed">{topic.description}</p>
-                )}
-              </>
-            ) : (
-              <div className="flex flex-wrap gap-1.5 mb-3">
-                {topic.label.split(" / ").map((word) => (
-                  <span key={word} className="px-2 py-0.5 rounded-full bg-zinc-950/60 text-sm font-bold">
-                    {word}
-                  </span>
-                ))}
-              </div>
-            )}
-            {(topic.keywords?.length ?? 0) > 0 && isLlm && (
-              <div className="flex flex-wrap gap-1 mb-3">
-                {topic.keywords!.map((word) => (
-                  <span key={word} className="px-2 py-0.5 rounded-full bg-zinc-950/50 text-[11px] text-zinc-300">
-                    {word}
-                  </span>
-                ))}
-              </div>
-            )}
-            {topic.top_tracks?.length > 0 && (
-              <ul className="space-y-1">
-                {topic.top_tracks.map((t, j) => (
-                  <li key={j} className="text-xs text-zinc-400 truncate">
-                    {!isLlm && (
-                      <span className="text-zinc-600 font-mono mr-1">{Math.round(t.weight * 100)}%</span>
-                    )}
-                    {t.title}
-                  </li>
-                ))}
-              </ul>
-            )}
+    <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      {topics.map((topic, i) => (
+        <div
+          key={topic.id}
+          className={`rounded-xl border bg-gradient-to-br p-4 hover:-translate-y-0.5 transition-transform ${GRADIENTS[i % GRADIENTS.length]}`}
+        >
+          <p className="text-[11px] uppercase tracking-widest text-zinc-400 mb-2">topic #{topic.topic_index + 1}</p>
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            {topic.label.split(" / ").map((word) => (
+              <span key={word} className="px-2 py-0.5 rounded-full bg-zinc-950/60 text-sm font-bold">
+                {word}
+              </span>
+            ))}
           </div>
-        ))}
-      </div>
+          {topic.top_tracks?.length > 0 && (
+            <ul className="space-y-1">
+              {topic.top_tracks.map((t, j) => (
+                <li key={j} className="text-xs text-zinc-400 truncate">
+                  <span className="text-zinc-600 font-mono mr-1">{Math.round(t.weight * 100)}%</span>
+                  {t.title}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ))}
     </div>
   );
 }

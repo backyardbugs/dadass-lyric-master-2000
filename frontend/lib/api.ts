@@ -1,9 +1,4 @@
-// Empty string = same-origin (Next.js rewrites proxy to the backend).
-// Set NEXT_PUBLIC_API_URL only when you want the browser to call the backend directly.
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL === undefined
-    ? ""
-    : process.env.NEXT_PUBLIC_API_URL;
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://dadass-lyric-master-2000.onrender.com";
 
 let spotifyToken: string | null = null;
 if (typeof window !== "undefined") {
@@ -57,10 +52,7 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Network error";
     if (/failed to fetch|load failed|network error/i.test(msg)) {
-      const target = API_BASE || "(same-origin proxy → backend)";
-      throw new Error(
-        `Could not reach the API at ${target}. Make sure the backend is running (uvicorn on port 8000), then hard-refresh.`,
-      );
+      throw new Error("Could not reach the server. If this keeps happening, the backend may be starting up (try again in 30 seconds).");
     }
     throw e;
   }
@@ -77,7 +69,6 @@ export type Status = {
   last_analyzed: string | null;
   playlist_name: string | null;
   image_url: string | null;
-  llm_available?: boolean;
 };
 
 export const getSpotifyLoginUrl = () => `${API_BASE}/api/auth/spotify`;
@@ -236,26 +227,9 @@ export type TrackLine = {
   text: string;
   valence: number;
   act: string;
-  act_source?: "llm" | "rules";
   rhyme_letter: string;
   rhyme_kind: "perfect" | "slant" | null;
   end_word: string;
-  line_index?: number;
-};
-
-export type TrackMetaphor = {
-  phrase: string;
-  source: string;
-  target: string;
-  line: number;
-  note: string;
-};
-
-export type TrackLlm = {
-  available: boolean;
-  summary: string;
-  metaphors: TrackMetaphor[];
-  imagery: Record<string, Record<string, string>>;
 };
 
 export type TrackSection = { label: string; lines: TrackLine[]; words: number };
@@ -287,7 +261,6 @@ export type TrackDetail = {
   sections: TrackSection[];
   summary: string;
   chorus_share: number;
-  llm?: TrackLlm;
 };
 
 export async function getTrack(id: number): Promise<TrackDetail> {
@@ -327,13 +300,11 @@ export async function getWordContext(word: string): Promise<{ word: string; cont
 export type Topic = {
   id: number;
   label: string;
-  description?: string;
-  keywords?: string[];
   topic_index: number;
   top_tracks: { title: string; artist: string; weight: number }[];
 };
 
-export async function getTopics(): Promise<{ topics: Topic[]; source?: "llm" | "nmf" | "none" }> {
+export async function getTopics(): Promise<{ topics: Topic[] }> {
   return fetchApi("/api/topics");
 }
 
