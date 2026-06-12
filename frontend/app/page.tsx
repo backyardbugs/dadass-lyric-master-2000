@@ -128,6 +128,12 @@ export default function DashboardPage() {
       const res = await runAnalyze();
       setMessage({ type: "success", text: res.message || "Analysis complete." });
       await loadStatus();
+      if (res.gemini?.status === "running") {
+        setMessage({
+          type: "success",
+          text: (res.message || "Analysis complete.") + " Open Explore — Gemini themes will appear in about a minute.",
+        });
+      }
     } catch (e) {
       setMessage({ type: "error", text: e instanceof Error ? e.message : "Analysis failed." });
     } finally {

@@ -10,7 +10,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
@@ -286,8 +286,42 @@ class AnalyzeResponse(BaseModel):
     gemini: dict | None = None
 
 
+def _run_gemini_pass(run_id: int, playlist_pk: int, dataset_name: str) -> None:
+    """Background Gemini craft pass — avoids Render's 30s HTTP timeout."""
+    try:
+        tracks = db.get_tracks(playlist_pk)
+        db.update_run_llm_status(run_id, {
+            "ok": False,
+            "status": "running",
+            "message": "Gemini craft pass in progress…",
+            "tracks_enriched": 0,
+        })
+        result = llm_module.analyze_corpus(tracks, dataset_name)
+        status = {
+            "ok": result.get("ok", False),
+            "status": "complete" if result.get("ok") else "failed",
+            "message": result.get("message", ""),
+            "tracks_enriched": len(result.get("track_data") or {}),
+            "chunks": result.get("chunks", 0),
+            "partial": result.get("partial", False),
+        }
+        if result.get("ok"):
+            for tid, data in result["track_data"].items():
+                db.update_track_llm(tid, data)
+            if result.get("themes"):
+                db.update_run_llm_themes(run_id, result["themes"])
+        db.update_run_llm_status(run_id, status)
+    except Exception as exc:
+        db.update_run_llm_status(run_id, {
+            "ok": False,
+            "status": "failed",
+            "message": str(exc)[:200],
+            "tracks_enriched": 0,
+        })
+
+
 @app.post("/api/analyze", response_model=AnalyzeResponse)
-def api_analyze():
+def api_analyze(background_tasks: BackgroundTasks):
     """Run word frequency, sentiment, POS, topic modeling on latest playlist and store results."""
     playlist_pk = db.get_latest_playlist_id()
     if playlist_pk is None:
@@ -339,34 +373,24 @@ def api_analyze():
 
     gemini_result: dict | None = None
     if llm_module.is_enabled():
+        info = db.get_playlist_info(playlist_pk)
+        dataset_name = (info or {}).get("name") or "Lyrics dataset"
+        gemini_result = {
+            "ok": False,
+            "status": "running",
+            "message": "Gemini craft pass running in background.",
+            "tracks_enriched": 0,
+        }
         try:
-            info = db.get_playlist_info(playlist_pk)
-            dataset_name = (info or {}).get("name") or "Lyrics dataset"
-            result = llm_module.analyze_corpus(tracks, dataset_name)
-            status = {
-                "ok": result.get("ok", False),
-                "message": result.get("message", ""),
-                "tracks_enriched": len(result.get("track_data") or {}),
-                "chunks": result.get("chunks", 0),
-                "partial": result.get("partial", False),
-            }
-            if result.get("ok"):
-                for tid, data in result["track_data"].items():
-                    db.update_track_llm(tid, data)
-                if result.get("themes"):
-                    db.update_run_llm_themes(run_id, result["themes"])
-            db.update_run_llm_status(run_id, status)
-            gemini_result = status
-        except Exception as exc:
-            status = {"ok": False, "message": str(exc)[:200], "tracks_enriched": 0}
-            try:
-                db.update_run_llm_status(run_id, status)
-            except Exception:
-                pass
-            gemini_result = status
+            db.update_run_llm_status(run_id, gemini_result)
+        except Exception:
+            pass
+        background_tasks.add_task(_run_gemini_pass, run_id, playlist_pk, dataset_name)
 
     msg = "Analysis complete."
-    if gemini_result and gemini_result.get("ok"):
+    if gemini_result and gemini_result.get("status") == "running":
+        msg += " Gemini craft pass is running — open Explore and refresh in about a minute."
+    elif gemini_result and gemini_result.get("ok"):
         msg += f" Gemini craft pass: {gemini_result.get('tracks_enriched', 0)} tracks enriched."
     elif gemini_result and gemini_result.get("message"):
         msg += f" (Gemini: {gemini_result['message']})"

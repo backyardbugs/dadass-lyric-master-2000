@@ -33,6 +33,7 @@ import {
   getTracks,
   getWordStats,
   getBarcode,
+  getStatus,
   type Stats,
   type Topic,
   type Craft,
@@ -58,35 +59,61 @@ export default function ExplorePage() {
   const [selectedWord, setSelectedWord] = useState<string | null>(null);
   const [contexts, setContexts] = useState<{ line: string; artist: string; title: string }[]>([]);
   const [contextLoading, setContextLoading] = useState(false);
+  const [geminiPending, setGeminiPending] = useState(false);
+
+  const loadExploreData = async () => {
+    const [wordsRes, heatRes, statsRes, topicsRes, craftRes, trendsRes, tracksRes, wordStatsRes, barcodeRes] =
+      await Promise.allSettled([
+        getTopWords(undefined, 100),
+        getSentimentHeatmap(),
+        getStats(),
+        getTopics(),
+        getCraft(),
+        getTrends(),
+        getTracks(),
+        getWordStats(),
+        getBarcode(),
+      ]);
+    setTopWords(wordsRes.status === "fulfilled" ? wordsRes.value.top_words : []);
+    setHeatmapTracks(heatRes.status === "fulfilled" ? heatRes.value.tracks : []);
+    setStats(statsRes.status === "fulfilled" && statsRes.value.has_data ? statsRes.value : null);
+    setTopics(topicsRes.status === "fulfilled" ? topicsRes.value.topics : []);
+    setTopicsSource(topicsRes.status === "fulfilled" ? topicsRes.value.source : undefined);
+    setCraft(craftRes.status === "fulfilled" && craftRes.value.has_data ? craftRes.value : null);
+    setTrendYears(trendsRes.status === "fulfilled" ? trendsRes.value.years : []);
+    setTrackList(tracksRes.status === "fulfilled" ? tracksRes.value.tracks : []);
+    setWordStats(wordStatsRes.status === "fulfilled" ? wordStatsRes.value.words : {});
+    setBarcode(barcodeRes.status === "fulfilled" ? barcodeRes.value.tracks : []);
+  };
 
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const [wordsRes, heatRes, statsRes, topicsRes, craftRes, trendsRes, tracksRes, wordStatsRes, barcodeRes] =
-        await Promise.allSettled([
-          getTopWords(undefined, 100),
-          getSentimentHeatmap(),
-          getStats(),
-          getTopics(),
-          getCraft(),
-          getTrends(),
-          getTracks(),
-          getWordStats(),
-          getBarcode(),
-        ]);
-      setTopWords(wordsRes.status === "fulfilled" ? wordsRes.value.top_words : []);
-      setHeatmapTracks(heatRes.status === "fulfilled" ? heatRes.value.tracks : []);
-      setStats(statsRes.status === "fulfilled" && statsRes.value.has_data ? statsRes.value : null);
-      setTopics(topicsRes.status === "fulfilled" ? topicsRes.value.topics : []);
-      setTopicsSource(topicsRes.status === "fulfilled" ? topicsRes.value.source : undefined);
-      setCraft(craftRes.status === "fulfilled" && craftRes.value.has_data ? craftRes.value : null);
-      setTrendYears(trendsRes.status === "fulfilled" ? trendsRes.value.years : []);
-      setTrackList(tracksRes.status === "fulfilled" ? tracksRes.value.tracks : []);
-      setWordStats(wordStatsRes.status === "fulfilled" ? wordStatsRes.value.words : {});
-      setBarcode(barcodeRes.status === "fulfilled" ? barcodeRes.value.tracks : []);
+      await loadExploreData();
+      try {
+        const st = await getStatus();
+        setGeminiPending(st.gemini_status?.status === "running");
+      } catch {
+        /* ignore */
+      }
       setLoading(false);
     })();
   }, []);
+
+  useEffect(() => {
+    if (!geminiPending) return;
+    const id = setInterval(async () => {
+      try {
+        const st = await getStatus();
+        if (st.gemini_status?.status === "running") return;
+        setGeminiPending(false);
+        await loadExploreData();
+      } catch {
+        /* ignore */
+      }
+    }, 5000);
+    return () => clearInterval(id);
+  }, [geminiPending]);
 
   const onWordClick = async (word: string) => {
     setSelectedWord(word);
@@ -137,6 +164,11 @@ export default function ExplorePage() {
           <p className="text-zinc-500">Loading…</p>
         ) : (
           <>
+            {geminiPending && (
+              <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+                Gemini craft pass still running… themes and track details will update automatically (usually under a minute).
+              </div>
+            )}
             <div className="grid lg:grid-cols-5 gap-6">
               <Card className="bg-zinc-900 border-zinc-800 lg:col-span-2">
                 <CardHeader>

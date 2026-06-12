@@ -70,7 +70,7 @@ export type Status = {
   playlist_name: string | null;
   image_url: string | null;
   gemini_enabled?: boolean;
-  gemini_status?: { ok?: boolean; message?: string; tracks_enriched?: number } | null;
+  gemini_status?: { ok?: boolean; status?: string; message?: string; tracks_enriched?: number } | null;
 };
 
 export const getSpotifyLoginUrl = () => `${API_BASE}/api/auth/spotify`;
@@ -101,14 +101,14 @@ export async function fetchPlaylist(playlistUrl: string): Promise<{ ok: boolean;
   });
 }
 
-const ANALYZE_TIMEOUT_MS = 300000;
+const ANALYZE_TIMEOUT_MS = 120000;
 
 export async function runAnalyze(): Promise<{
   ok: boolean;
   message: string;
   top_words: { word: string; count: number }[];
   run_id: number;
-  gemini?: { ok?: boolean; message?: string; tracks_enriched?: number } | null;
+  gemini?: { ok?: boolean; status?: string; message?: string; tracks_enriched?: number } | null;
 }> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), ANALYZE_TIMEOUT_MS);
