@@ -9,6 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { getTrack, type TrackSummary, type TrackDetail, type TrackLine, type WordStat } from "@/lib/api";
+import { groupConsecutiveLines } from "@/lib/line-groups";
 import { brightness, valenceColor } from "@/lib/tone";
 
 const WORD_SPLIT = /([A-Za-z][A-Za-z']*)/;
@@ -18,7 +19,7 @@ type Lens = "plain" | "tone" | "concreteness" | "frequency";
 const LENSES: { key: Lens; label: string; hint: string }[] = [
   { key: "plain", label: "Plain", hint: "" },
   { key: "tone", label: "Tone", hint: "Line background: indigo = dark, amber = bright." },
-  { key: "concreteness", label: "Concrete vs abstract", hint: "Green = concrete image, violet = abstract idea, gray = referential (you, somebody). Uses Gemini when cached from Analyze." },
+  { key: "concreteness", label: "Concrete vs abstract", hint: "Green = concrete image, violet = abstract idea, gray = referential (you, somebody). Uses narrative analysis when available." },
   { key: "frequency", label: "Their favorites", hint: "Stronger pink = a word this writer uses more across the dataset." },
 ];
 
@@ -70,7 +71,7 @@ function HoverableLine({
   lens,
   stats,
   maxCount,
-  geminiImagery,
+  narrativeImagery,
   onHover,
   onWordClick,
 }: {
@@ -78,7 +79,7 @@ function HoverableLine({
   lens: Lens;
   stats: Record<string, WordStat>;
   maxCount: number;
-  geminiImagery?: Record<string, string>;
+  narrativeImagery?: Record<string, string>;
   onHover: (word: string | null, x: number, y: number) => void;
   onWordClick?: (word: string) => void;
 }) {
@@ -91,7 +92,7 @@ function HoverableLine({
         if (!stat) return <span key={i}>{part}</span>;
         const style: React.CSSProperties = {};
         if (lens === "concreteness") {
-          const role = geminiImagery?.[key];
+          const role = narrativeImagery?.[key];
           const c = role ? imageryColor(role) : concColor(stat.conc);
           if (c) style.color = c;
         } else if (lens === "frequency" && stat.count >= 3) {
@@ -206,6 +207,7 @@ export function TracksPanel({
   const hoverStat = hover ? wordStats[hover.word] : null;
 
   const allLines = open ? open.sections.flatMap((s) => s.lines.map((l) => l.text)) : [];
+  const narrative = open?.narrative ?? open?.gemini;
   const rhymeLetters = open
     ? Array.from(new Set(open.sections.flatMap((s) => s.lines.map((l) => l.rhyme_letter)).filter(Boolean)))
     : [];
@@ -285,14 +287,14 @@ export function TracksPanel({
                 )}
               </div>
               {open.summary && <p className="text-xs text-zinc-500 font-mono">{open.summary}</p>}
-              {open.gemini?.summary && (
-                <p className="text-xs text-emerald-400/90 mt-1 leading-relaxed">{open.gemini.summary}</p>
+              {narrative?.summary && (
+                <p className="text-xs text-emerald-400/90 mt-1 leading-relaxed">{narrative.summary}</p>
               )}
-              {open.gemini?.metaphors && open.gemini.metaphors.length > 0 && (
+              {narrative?.metaphors && narrative.metaphors.length > 0 && (
                 <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3 my-2">
                   <p className="text-[11px] uppercase tracking-widest text-zinc-500 mb-2">Metaphors &amp; images</p>
                   <ul className="space-y-2">
-                    {open.gemini.metaphors.map((m, i) => (
+                    {narrative.metaphors.map((m, i) => (
                       <li key={i} className="text-xs text-zinc-300">
                         <span className="text-rose-300 font-semibold">&ldquo;{m.phrase}&rdquo;</span>
                         {m.source && m.target && (
@@ -333,9 +335,9 @@ export function TracksPanel({
                       <p className="text-[11px] uppercase tracking-widest text-rose-400/80 font-semibold mb-1">
                         {s.label} <span className="text-zinc-600 normal-case tracking-normal">· {s.words} words</span>
                       </p>
-                      {s.lines.map((line, j) => {
+                      {groupConsecutiveLines(s.lines).map(({ line, count }, j) => {
                         const lineIdx = line.line_index ?? j;
-                        const geminiImagery = open.gemini?.imagery?.[String(lineIdx)];
+                        const narrativeImagery = narrative?.imagery?.[String(lineIdx)];
                         return (
                         <div
                           key={j}
@@ -348,14 +350,22 @@ export function TracksPanel({
                               lens={lens}
                               stats={wordStats}
                               maxCount={maxCount}
-                              geminiImagery={geminiImagery}
+                              narrativeImagery={narrativeImagery}
                               onHover={onHover}
                               onWordClick={onWordClick}
                             />
+                            {count > 1 && (
+                              <span
+                                className="ml-2 align-middle text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400"
+                                title={`Repeated ${count} times in a row`}
+                              >
+                                ×{count}
+                              </span>
+                            )}
                             {line.act !== "statement" && (
                               <span
                                 className={`ml-2 align-middle text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded ${ACT_STYLES[line.act] || "bg-zinc-700/40 text-zinc-400"}`}
-                                title={line.act_source === "gemini" ? "Sentence-aware (Gemini)" : "Rule-based"}
+                                title={line.act_source === "semantic" || line.act_source === "gemini" ? "Sentence-aware (narrative analysis)" : "Rule-based"}
                               >
                                 {line.act}
                               </span>

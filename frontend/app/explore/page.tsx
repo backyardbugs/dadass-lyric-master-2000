@@ -22,6 +22,7 @@ import { SoundProfilePanel, DictionPanel, SpeechActsPanel, SectionContrastPanel 
 import { AlbumBarcode } from "@/components/album-barcode";
 import { TrendsChart } from "@/components/trends-chart";
 import { TracksPanel } from "@/components/tracks-panel";
+import { DownloadReportButton } from "@/components/download-report-button";
 import {
   getTopWords,
   getSentimentHeatmap,
@@ -33,7 +34,6 @@ import {
   getTracks,
   getWordStats,
   getBarcode,
-  getStatus,
   type Stats,
   type Topic,
   type Craft,
@@ -59,10 +59,6 @@ export default function ExplorePage() {
   const [selectedWord, setSelectedWord] = useState<string | null>(null);
   const [contexts, setContexts] = useState<{ line: string; artist: string; title: string }[]>([]);
   const [contextLoading, setContextLoading] = useState(false);
-  const [geminiPending, setGeminiPending] = useState(false);
-  const [geminiPollError, setGeminiPollError] = useState<string | null>(null);
-
-  const GEMINI_POLL_TIMEOUT_MS = 3 * 60 * 1000;
 
   const loadExploreData = async () => {
     const [wordsRes, heatRes, statsRes, topicsRes, craftRes, trendsRes, tracksRes, wordStatsRes, barcodeRes] =
@@ -93,39 +89,9 @@ export default function ExplorePage() {
     (async () => {
       setLoading(true);
       await loadExploreData();
-      try {
-        const st = await getStatus();
-        setGeminiPending(st.gemini_status?.status === "running");
-      } catch {
-        /* ignore */
-      }
       setLoading(false);
     })();
   }, []);
-
-  useEffect(() => {
-    if (!geminiPending) return;
-    const startedAt = Date.now();
-    const id = setInterval(async () => {
-      if (Date.now() - startedAt > GEMINI_POLL_TIMEOUT_MS) {
-        setGeminiPending(false);
-        setGeminiPollError(
-          "Gemini craft pass is taking longer than expected. Refresh the page to check again, or re-run Analyze."
-        );
-        return;
-      }
-      try {
-        const st = await getStatus();
-        if (st.gemini_status?.status === "running") return;
-        setGeminiPending(false);
-        setGeminiPollError(null);
-        await loadExploreData();
-      } catch {
-        /* ignore */
-      }
-    }, 5000);
-    return () => clearInterval(id);
-  }, [geminiPending]);
 
   const onWordClick = async (word: string) => {
     setSelectedWord(word);
@@ -140,6 +106,10 @@ export default function ExplorePage() {
       setContextLoading(false);
     }
   };
+
+  const reportFilename = stats?.name
+    ? `${stats.name.replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "-").toLowerCase()}-lyric-report.pdf`
+    : "lyric-analysis-report.pdf";
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 p-6">
@@ -167,25 +137,22 @@ export default function ExplorePage() {
               </p>
             </div>
           </div>
-          <Button asChild variant="outline" size="sm" className="border-zinc-600">
-            <Link href="/">Back to dashboard</Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <DownloadReportButton
+              targetId="explore-report"
+              filename={reportFilename}
+              disabled={loading || !stats}
+            />
+            <Button asChild variant="outline" size="sm" className="border-zinc-600">
+              <Link href="/">Back to dashboard</Link>
+            </Button>
+          </div>
         </header>
 
         {loading ? (
           <p className="text-zinc-500">Loading…</p>
         ) : (
-          <>
-            {geminiPending && (
-              <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
-                Gemini craft pass still running… themes and track details will update automatically (usually under a minute).
-              </div>
-            )}
-            {geminiPollError && (
-              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
-                {geminiPollError}
-              </div>
-            )}
+          <div id="explore-report" className="space-y-6">
             <div className="grid lg:grid-cols-5 gap-6">
               <Card className="bg-zinc-900 border-zinc-800 lg:col-span-2">
                 <CardHeader>
@@ -386,8 +353,8 @@ export default function ExplorePage() {
               <CardHeader>
                 <CardTitle>Themes</CardTitle>
                 <CardDescription>
-                  Recurring ideas across the dataset. After Analyze, Gemini names the themes; otherwise
-                  TF-IDF + NMF word clusters.
+                  Recurring ideas across the dataset. After analysis, the semantic engine names themes;
+                  otherwise TF-IDF word clusters.
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -406,7 +373,7 @@ export default function ExplorePage() {
                 <TrendsChart years={trendYears} />
               </CardContent>
             </Card>
-          </>
+          </div>
         )}
       </div>
 

@@ -1,6 +1,7 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://dadass-lyric-master-2000-1.onrender.com";
 
 const ACTIVE_PLAYLIST_KEY = "active_playlist_id";
+const SEMANTIC_API_KEY_STORAGE = "semantic_api_key";
 
 let spotifyToken: string | null = null;
 let activePlaylistId: string | null = null;
@@ -103,14 +104,139 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
+export function getSemanticApiKey(): string | null {
+  try {
+    if (typeof window !== "undefined") {
+      return sessionStorage.getItem(SEMANTIC_API_KEY_STORAGE);
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+export function setSemanticApiKey(key: string | null) {
+  try {
+    if (typeof window !== "undefined") {
+      if (key?.trim()) sessionStorage.setItem(SEMANTIC_API_KEY_STORAGE, key.trim());
+      else sessionStorage.removeItem(SEMANTIC_API_KEY_STORAGE);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+export type AnalyzeDatasetEvent = {
+  status: string;
+  progress?: number;
+  phase?: string;
+  message?: string;
+  playlist_id?: string;
+  playlist_name?: string;
+  track_count?: number;
+  run_id?: number;
+  batch?: number;
+  batches_total?: number;
+  tracks_enriched?: number;
+  themes_count?: number;
+  skipped?: boolean;
+  error?: string;
+};
+
+/** Stream POST /api/analyze-dataset (SSE). Calls onEvent for each progress update. */
+export async function streamAnalyzeDataset(
+  params: {
+    spotify_url?: string;
+    playlist_id?: string;
+    gemini_api_key?: string | null;
+  },
+  onEvent: (event: AnalyzeDatasetEvent) => void,
+  signal?: AbortSignal,
+): Promise<AnalyzeDatasetEvent> {
+  const body: Record<string, string | null | undefined> = {};
+  if (params.spotify_url) body.spotify_url = params.spotify_url;
+  if (params.playlist_id) body.playlist_id = params.playlist_id;
+  const byok = params.gemini_api_key ?? getSemanticApiKey();
+  if (byok) body.gemini_api_key = byok;
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/api/analyze-dataset`, {
+      method: "POST",
+      credentials: "include",
+      headers: authHeaders(),
+      body: JSON.stringify(body),
+      signal,
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Network error";
+    if (/abort/i.test(msg) || (e instanceof Error && e.name === "AbortError")) {
+      throw new Error("Analysis cancelled.");
+    }
+    throw new Error("Could not reach the server. The backend may be starting up — try again in 30 seconds.");
+  }
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(typeof err.detail === "string" ? err.detail : JSON.stringify(err));
+  }
+
+  if (!res.body) {
+    throw new Error("Streaming not supported in this browser.");
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let last: AnalyzeDatasetEvent = { status: "unknown", progress: 0 };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const chunks = buffer.split("\n\n");
+    buffer = chunks.pop() ?? "";
+    for (const chunk of chunks) {
+      for (const line of chunk.split("\n")) {
+        if (!line.startsWith("data: ")) continue;
+        try {
+          const parsed = JSON.parse(line.slice(6)) as AnalyzeDatasetEvent;
+          last = parsed;
+          onEvent(parsed);
+        } catch {
+          /* ignore malformed SSE */
+        }
+      }
+    }
+  }
+
+  if (last.status === "error") {
+    throw new Error(last.message || last.error || "Analysis failed.");
+  }
+  return last;
+}
+
 export type Status = {
   has_data: boolean;
   track_count: number;
   last_analyzed: string | null;
   playlist_name: string | null;
   image_url: string | null;
+  /** @deprecated API field name — means semantic engine available on server */
   gemini_enabled?: boolean;
-  gemini_status?: { ok?: boolean; status?: string; message?: string; tracks_enriched?: number } | null;
+  semantic_enabled?: boolean;
+  gemini_status?: {
+    ok?: boolean;
+    status?: string;
+    message?: string;
+    tracks_enriched?: number;
+  } | null;
+  semantic_status?: {
+    ok?: boolean;
+    status?: string;
+    message?: string;
+    tracks_enriched?: number;
+  } | null;
 };
 
 export const getSpotifyLoginUrl = () => `${API_BASE}/api/auth/spotify`;
@@ -131,7 +257,12 @@ export async function getAuthStatus(): Promise<{ spotify: boolean }> {
 }
 
 export async function getStatus(): Promise<Status> {
-  return fetchApi<Status>(withPlaylistId("/api/status"));
+  const s = await fetchApi<Status>(withPlaylistId("/api/status"));
+  return {
+    ...s,
+    semantic_enabled: s.gemini_enabled,
+    semantic_status: s.gemini_status,
+  };
 }
 
 export async function fetchPlaylist(playlistUrl: string): Promise<{ ok: boolean; message: string; track_count: number; playlist_id?: string }> {
@@ -178,7 +309,7 @@ export async function runAnalyze(playlistId?: string | null): Promise<{
   } catch (e) {
     clearTimeout(timeoutId);
     if (e instanceof Error && e.name === "AbortError") {
-      throw new Error("Analysis timed out. Gemini craft pass can take a few minutes on larger albums — try again or use a smaller dataset.");
+      throw new Error("Analysis timed out. Narrative analysis can take a few minutes on larger albums — try again or use a smaller dataset.");
     }
     const msg = e instanceof Error ? e.message : "Network error";
     if (/failed to fetch|load failed|network error/i.test(msg)) {
@@ -285,7 +416,7 @@ export type TrackLine = {
   text: string;
   valence: number;
   act: string;
-  act_source?: "gemini" | "rules";
+  act_source?: "semantic" | "gemini" | "rules" | "pending";
   rhyme_letter: string;
   rhyme_kind: "perfect" | "slant" | null;
   end_word: string;
@@ -300,12 +431,15 @@ export type TrackMetaphor = {
   note: string;
 };
 
-export type TrackGemini = {
+export type TrackNarrative = {
   available: boolean;
   summary: string;
   metaphors: TrackMetaphor[];
   imagery: Record<string, Record<string, string>>;
 };
+
+/** @deprecated use TrackNarrative — API still returns `gemini` key */
+export type TrackGemini = TrackNarrative;
 
 export type TrackSection = { label: string; lines: TrackLine[]; words: number };
 
@@ -336,11 +470,13 @@ export type TrackDetail = {
   sections: TrackSection[];
   summary: string;
   chorus_share: number;
-  gemini?: TrackGemini;
+  gemini?: TrackNarrative;
+  narrative?: TrackNarrative;
 };
 
 export async function getTrack(id: number): Promise<TrackDetail> {
-  return fetchApi(withPlaylistId(`/api/track/${id}`));
+  const t = await fetchApi<TrackDetail>(withPlaylistId(`/api/track/${id}`));
+  return { ...t, narrative: t.narrative ?? t.gemini };
 }
 
 export type WordStat = { count: number; songs: number; ratio: number; conc?: number };
