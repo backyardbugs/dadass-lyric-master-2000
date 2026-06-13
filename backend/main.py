@@ -10,9 +10,9 @@ from pathlib import Path
 from urllib.parse import quote
 
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from pydantic import BaseModel
 from spotipy.oauth2 import SpotifyOAuth
 
@@ -23,30 +23,24 @@ from spotipy import Spotify
 
 from backend.cleaner import clean_lyrics
 from backend.fetch import _TokenAuth, extract_spotify_ref, fetch_source
-from backend.analyze import tokenize_lyrics, top_n_words, build_word_contexts
-from backend.nlp import (
-    GENERIC_INDEFINITES,
-    VOCALIZATIONS,
-    _corpus_counts,
-    _stopwords,
-    classify_speech_act,
-    concreteness_for,
+from backend.metrics import (
     corpus_hooks,
     corpus_rhyme_pairs,
     end_rhyme_scheme,
     line_valence,
     pov_profile,
-    run_topics,
+    run_deterministic_analysis,
     section_contrast,
-    signature_words,
     song_structure,
-    speech_acts_profile,
-    top_n_by_pos,
+    tokenize_lyrics,
+    tokens,
+    top_n_words,
     track_metrics,
+    WORD_RE,
 )
+from backend.analyze_stream import analyze_dataset_stream
 from backend import db
 from backend import llm as llm_module
-from backend.nltk_init import ensure_nltk_data
 
 app = FastAPI(title="Dad Ass Lyric Analyzer 3000 API", version="0.1.0")
 
@@ -88,7 +82,6 @@ def _get_spotify_token_from_request(request: Request) -> str | None:
 
 @app.on_event("startup")
 def startup():
-    ensure_nltk_data()
     db.init_db()
 
 
@@ -202,9 +195,9 @@ def api_auth_status(request: Request):
     return {"spotify": _spotify_token_valid(token)}
 
 
-@app.post("/api/fetch", response_model=FetchResponse)
+@app.post("/api/fetch", response_model=FetchResponse, deprecated=True)
 def api_fetch(body: FetchRequest, request: Request):
-    """Fetch a playlist, album, or artist from Spotify plus lyrics; clean and store in DB. Uses Spotify OAuth token if present."""
+    """[DEPRECATED] Use POST /api/analyze-dataset (SSE). Fetch Spotify + lyrics and store in DB."""
     ref = extract_spotify_ref(body.playlist_url)
     if not ref:
         raise HTTPException(status_code=400, detail="Invalid Spotify URL. Paste a playlist, album, or artist link.")
@@ -296,122 +289,57 @@ class AnalyzeResponse(BaseModel):
     gemini: dict | None = None
 
 
-def _run_gemini_pass(run_id: int, playlist_pk: int, dataset_name: str) -> None:
-    """Background Gemini craft pass — avoids Render's 30s HTTP timeout."""
-    try:
-        tracks = db.get_tracks(playlist_pk)
-        db.update_run_llm_status(run_id, {
-            "ok": False,
-            "status": "running",
-            "message": "Gemini craft pass in progress…",
-            "tracks_enriched": 0,
-        })
-        result = llm_module.analyze_corpus(tracks, dataset_name)
-        status = {
-            "ok": result.get("ok", False),
-            "status": "complete" if result.get("ok") else "failed",
-            "message": result.get("message", ""),
-            "tracks_enriched": len(result.get("track_data") or {}),
-            "chunks": result.get("chunks", 0),
-            "partial": result.get("partial", False),
-        }
-        if result.get("ok"):
-            for tid, data in result["track_data"].items():
-                db.update_track_llm(tid, data)
-            if result.get("themes"):
-                db.update_run_llm_themes(run_id, result["themes"])
-        db.update_run_llm_status(run_id, status)
-    except Exception as exc:
-        db.update_run_llm_status(run_id, {
-            "ok": False,
-            "status": "failed",
-            "message": str(exc)[:200],
-            "tracks_enriched": 0,
-        })
+class AnalyzeDatasetRequest(BaseModel):
+    spotify_url: str | None = None
+    playlist_id: str | None = None
+    gemini_api_key: str | None = None
 
 
-@app.post("/api/analyze", response_model=AnalyzeResponse)
-def api_analyze(background_tasks: BackgroundTasks, body: AnalyzeRequest | None = None):
-    """Run word frequency, sentiment, POS, topic modeling on a specific dataset."""
+@app.post("/api/analyze-dataset")
+async def api_analyze_dataset(body: AnalyzeDatasetRequest, request: Request):
+    """Unified streaming pipeline: fetch lyrics + deterministic metrics (+ semantic engine in Phase 2)."""
+    if not body.spotify_url and not body.playlist_id:
+        raise HTTPException(status_code=400, detail="Provide spotify_url or playlist_id.")
+    spotify_token = _get_spotify_token_from_request(request)
+    return StreamingResponse(
+        analyze_dataset_stream(
+            spotify_url=body.spotify_url,
+            playlist_id=body.playlist_id,
+            spotify_token=spotify_token,
+            gemini_api_key=body.gemini_api_key,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.post("/api/analyze", response_model=AnalyzeResponse, deprecated=True)
+def api_analyze(body: AnalyzeRequest | None = None):
+    """[DEPRECATED] Use POST /api/analyze-dataset (SSE). Run deterministic metrics on a dataset."""
     req = body or AnalyzeRequest()
     playlist_pk = _resolve_playlist_pk(req.playlist_id)
     if playlist_pk is None:
         raise HTTPException(status_code=400, detail="No playlist data. Run fetch first.")
+    try:
+        run_id = run_deterministic_analysis(playlist_pk)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     tracks = db.get_tracks(playlist_pk)
-    if not tracks:
-        raise HTTPException(status_code=400, detail="No tracks found.")
     text_key = "cleaned_lyrics"
-    tokens = tokenize_lyrics(tracks, text_key=text_key)
-    if not tokens:
-        text_key = "raw_lyrics"
-        tokens = tokenize_lyrics(tracks, text_key=text_key)
-    if not tokens:
-        raise HTTPException(status_code=400, detail="No lyrics to analyze. Fetch a playlist with lyrics first.")
-    top50 = top_n_words(tokens, n=50)
-    word_contexts = build_word_contexts(tracks, text_key=text_key)
-    if not word_contexts:
-        word_contexts = build_word_contexts(tracks, text_key="raw_lyrics")
-
-    run_id = db.insert_analysis_run(playlist_pk)
-    db.delete_word_frequencies_for_run(run_id)
-    db.insert_word_frequencies(run_id, top50, pos=None)
-    db.insert_word_contexts(run_id, word_contexts)
-
-    try:
-        for t in tracks:
-            raw = t.get("cleaned_lyrics") or t.get("raw_lyrics") or ""
-            metrics = track_metrics(raw)
-            db.update_track_metrics(t["id"], metrics)
-    except Exception:
-        pass
-
-    try:
-        by_pos = top_n_by_pos(tracks, text_key=text_key, n=500)
-        for pos_name, pairs in by_pos.items():
-            db.insert_word_frequencies(run_id, pairs, pos=pos_name)
-    except Exception:
-        pass
-
-    try:
-        topic_labels, per_track_weights, doc_track_ids = run_topics(tracks, text_key=text_key, n_topics=6)
-        if topic_labels and per_track_weights and doc_track_ids:
-            topic_ids = db.insert_topics(run_id, topic_labels)
-            for topic_idx, topic_id in enumerate(topic_ids):
-                weights = [(doc_track_ids[i], per_track_weights[i][topic_idx][1]) for i in range(len(per_track_weights))]
-                db.insert_track_topics(run_id, topic_id, weights)
-    except Exception:
-        pass
-
-    gemini_result: dict | None = None
-    if llm_module.is_enabled():
-        info = db.get_playlist_info(playlist_pk)
-        dataset_name = (info or {}).get("name") or "Lyrics dataset"
-        gemini_result = {
-            "ok": False,
-            "status": "running",
-            "message": "Gemini craft pass running in background.",
-            "tracks_enriched": 0,
-        }
-        try:
-            db.update_run_llm_status(run_id, gemini_result)
-        except Exception:
-            pass
-        background_tasks.add_task(_run_gemini_pass, run_id, playlist_pk, dataset_name)
-
-    msg = "Analysis complete."
-    if gemini_result and gemini_result.get("status") == "running":
-        msg += " Gemini craft pass is running — open Explore and refresh in about a minute."
-    elif gemini_result and gemini_result.get("ok"):
-        msg += f" Gemini craft pass: {gemini_result.get('tracks_enriched', 0)} tracks enriched."
-    elif gemini_result and gemini_result.get("message"):
-        msg += f" (Gemini: {gemini_result['message']})"
-
+    tok_list = tokenize_lyrics(tracks, text_key=text_key)
+    if not tok_list:
+        tok_list = tokenize_lyrics(tracks, text_key="raw_lyrics")
+    top50 = top_n_words(tok_list, n=50)
     return AnalyzeResponse(
         ok=True,
-        message=msg,
+        message="Deterministic analysis complete. Use /api/analyze-dataset for the streaming pipeline.",
         top_words=[{"word": w, "count": c} for w, c in top50],
         run_id=run_id,
-        gemini=gemini_result,
+        gemini={"ok": False, "status": "pending", "message": "Semantic engine queued (Phase 2).", "tracks_enriched": 0},
     )
 
 
@@ -590,7 +518,6 @@ def api_topics(playlist_id: str | None = None):
         conn.close()
 
 
-_WORD_RE = re.compile(r"[a-z][a-z']*")
 
 
 @app.get("/api/stats")
@@ -609,7 +536,7 @@ def api_stats(playlist_id: str | None = None):
     per_track = []
     for t in tracks:
         text = (t.get("cleaned_lyrics") or t.get("raw_lyrics") or "").lower()
-        words = _WORD_RE.findall(text)
+        words = tokens(text)
         total_words += len(words)
         vocab.update(words)
         m = t.get("metrics") or {}
@@ -670,7 +597,6 @@ _SOUND_AVG_KEYS = [
     "syllables_per_line", "syllable_consistency", "perfect_rhyme_density",
     "slant_rhyme_density", "internal_rhyme", "alliteration", "assonance",
     "plosive_ratio", "sibilant_ratio", "soft_ratio",
-    "concreteness", "pct_concrete", "pct_abstract", "sensory_per_100",
 ]
 
 
@@ -690,11 +616,6 @@ def api_craft(playlist_id: str | None = None):
         return {"has_data": False}
 
     # Lyrics baseline from every other dataset fetched into this DB
-    baseline_tracks = db.get_baseline_tracks(playlist_pk)
-    baseline_counts, _ = _corpus_counts(baseline_tracks) if baseline_tracks else (None, None)
-    sig = signature_words(tracks, baseline_counts=baseline_counts)
-
-    # Corpus sound/diction averages from stored per-track metrics
     with_metrics = [t["metrics"] for t in tracks if t.get("metrics")]
     sound = {}
     if with_metrics:
@@ -702,20 +623,15 @@ def api_craft(playlist_id: str | None = None):
             vals = [m.get(key) for m in with_metrics if m.get(key) is not None]
             if vals:
                 sound[key] = round(sum(vals) / len(vals), 4)
-        sensory_totals: dict[str, int] = {}
-        for m in with_metrics:
-            for k, v in (m.get("sensory") or {}).items():
-                sensory_totals[k] = sensory_totals.get(k, 0) + v
-        sound["sensory_totals"] = sensory_totals
 
     result = {
         "has_data": True,
-        "signature_words": sig["words"],
-        "signature_baseline": sig["baseline"],
+        "signature_words": [],
+        "signature_baseline": "semantic engine pending",
         "hooks": corpus_hooks(tracks),
         "rhyme_pairs": corpus_rhyme_pairs(tracks),
         "pov": pov_profile(tracks),
-        "speech_acts": speech_acts_profile(tracks),
+        "speech_acts": {"total_lines": 0, "acts": []},
         "sound": sound,
         "section_contrast": section_contrast(tracks),
     }
@@ -782,7 +698,7 @@ def api_track(track_id: int, playlist_id: str | None = None):
             {
                 "label": s["label"],
                 "lines": s["lines"],
-                "words": len(_WORD_RE.findall(" ".join(s["lines"]).lower())),
+                "words": len(WORD_RE.findall(" ".join(s["lines"]).lower())),
             }
             for s in raw_sections
         ]
@@ -807,13 +723,13 @@ def api_track(track_id: int, playlist_id: str | None = None):
         line_data = []
         for line in s["lines"]:
             r = scheme[idx] if idx < len(scheme) else {"letter": "", "kind": None, "word": ""}
-            rule_act = classify_speech_act(line, prev_line=prev_line)
+            rule_act = "statement"
             act = llm_module.act_for_line(track_llm, idx, rule_act)
             line_data.append({
                 "text": line,
                 "valence": round(line_valence(line), 3),
                 "act": act,
-                "act_source": "gemini" if track_llm and str(idx) in (track_llm.get("line_acts") or {}) else "rules",
+                "act_source": "semantic" if track_llm and str(idx) in (track_llm.get("line_acts") or {}) else "pending",
                 "rhyme_letter": r["letter"],
                 "rhyme_kind": r["kind"],
                 "end_word": r["word"],
@@ -867,29 +783,22 @@ def api_word_stats(playlist_id: str | None = None):
     songs: dict[str, int] = {}
     for t in tracks:
         text = (t.get("cleaned_lyrics") or t.get("raw_lyrics") or "").lower()
-        toks = _WORD_RE.findall(text)
+        toks = tokens(text)
         for w in toks:
             counts[w] = counts.get(w, 0) + 1
         for w in set(toks):
             songs[w] = songs.get(w, 0) + 1
     total = sum(counts.values()) or 1
-    # Pronouns/function words and generic indefinites are rated by the norms but
-    # don't function as imagery — leave their concreteness out of the lens.
-    no_conc = _stopwords() | GENERIC_INDEFINITES | VOCALIZATIONS
+    stop = stopwords()
     words = {}
     for w, c in counts.items():
         corpus_zipf = math.log10(c / total * 1e9)
         eng = zipf_frequency(w, "en") or 1.5
-        entry = {
+        words[w] = {
             "count": c,
             "songs": songs.get(w, 0),
             "ratio": round(10 ** (corpus_zipf - eng), 1),
         }
-        if w not in no_conc:
-            conc = concreteness_for(w)
-            if conc is not None:
-                entry["conc"] = round(conc, 2)
-        words[w] = entry
     result = {"words": words}
     _word_stats_cache.clear()
     _word_stats_cache[playlist_pk] = result
@@ -1027,10 +936,8 @@ def api_cliche_words(playlist_id: str | None = None):
 @app.post("/api/cliche-check")
 def api_cliche_check(body: ClicheCheckRequest, playlist_id: str | None = None):
     """Tokenize text and return which words are in the >50% cliche set."""
-    from nltk.tokenize import word_tokenize
     cliche_res = api_cliche_words(playlist_id=playlist_id)
     cliche_set = set(cliche_res.get("words", []))
     text = (body.text or "").lower()
-    tokens = [w for w in word_tokenize(text) if w.isalpha()]
-    found = [w for w in tokens if w in cliche_set]
+    found = [w for w in tokens(text) if w in cliche_set]
     return {"cliche_words": list(dict.fromkeys(found))}
