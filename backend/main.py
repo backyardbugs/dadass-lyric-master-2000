@@ -40,7 +40,7 @@ from backend.metrics import (
 )
 from backend.analyze_stream import analyze_dataset_stream
 from backend import db
-from backend import llm as llm_module
+from backend import semantic_engine as semantic_module
 
 app = FastAPI(title="Dad Ass Lyric Analyzer 3000 API", version="0.1.0")
 
@@ -378,7 +378,7 @@ def api_status(playlist_id: str | None = None):
         last_analyzed=last_analyzed,
         playlist_name=info.get("name") or None,
         image_url=info.get("image_url") or None,
-        gemini_enabled=llm_module.is_enabled(),
+        gemini_enabled=semantic_module.is_enabled(),
         gemini_status=gemini_status,
     )
 
@@ -486,7 +486,7 @@ def api_topics(playlist_id: str | None = None):
                 "topic_index": th.get("topic_index", 0),
                 "top_tracks": top_tracks,
             })
-        return {"topics": topics, "source": "gemini"}
+        return {"topics": topics, "source": "semantic"}
 
     conn = db.get_connection()
     try:
@@ -627,11 +627,11 @@ def api_craft(playlist_id: str | None = None):
     result = {
         "has_data": True,
         "signature_words": [],
-        "signature_baseline": "semantic engine pending",
+        "signature_baseline": "semantic engine",
         "hooks": corpus_hooks(tracks),
         "rhyme_pairs": corpus_rhyme_pairs(tracks),
         "pov": pov_profile(tracks),
-        "speech_acts": {"total_lines": 0, "acts": []},
+        "speech_acts": semantic_module.corpus_speech_acts(tracks),
         "sound": sound,
         "section_contrast": section_contrast(tracks),
     }
@@ -687,13 +687,13 @@ def api_track(track_id: int, playlist_id: str | None = None):
 
     text = t.get("cleaned_lyrics") or t.get("raw_lyrics") or ""
     flat_lines = [l.strip() for l in text.split("\n") if l.strip()]
-    track_llm = db.get_track_llm(track_id)
-    text_hash = llm_module.lyrics_hash("\n".join(flat_lines)) if flat_lines else ""
-    if track_llm and track_llm.get("hash") != text_hash:
-        track_llm = None
+    track_sem = db.get_track_llm(track_id)
+    text_hash = semantic_module.lyrics_hash("\n".join(flat_lines)) if flat_lines else ""
+    if track_sem and track_sem.get("hash") != text_hash:
+        track_sem = None
 
-    if track_llm and track_llm.get("sections") and flat_lines:
-        raw_sections = llm_module.sections_from_llm(track_llm, flat_lines)
+    if track_sem and track_sem.get("sections") and flat_lines:
+        raw_sections = semantic_module.sections_from_semantic(track_sem, flat_lines)
         sections = [
             {
                 "label": s["label"],
@@ -723,13 +723,12 @@ def api_track(track_id: int, playlist_id: str | None = None):
         line_data = []
         for line in s["lines"]:
             r = scheme[idx] if idx < len(scheme) else {"letter": "", "kind": None, "word": ""}
-            rule_act = "statement"
-            act = llm_module.act_for_line(track_llm, idx, rule_act)
+            act = semantic_module.act_for_line(track_sem, idx, "statement")
             line_data.append({
                 "text": line,
-                "valence": round(line_valence(line), 3),
+                "valence": semantic_module.valence_for_line(track_sem, idx),
                 "act": act,
-                "act_source": "semantic" if track_llm and str(idx) in (track_llm.get("line_acts") or {}) else "pending",
+                "act_source": "semantic" if track_sem and str(idx) in (track_sem.get("line_acts") or {}) else "pending",
                 "rhyme_letter": r["letter"],
                 "rhyme_kind": r["kind"],
                 "end_word": r["word"],
@@ -754,10 +753,10 @@ def api_track(track_id: int, playlist_id: str | None = None):
         "summary": summary,
         "chorus_share": chorus_share,
         "gemini": {
-            "available": bool(track_llm),
-            "summary": (track_llm or {}).get("summary") or "",
-            "metaphors": (track_llm or {}).get("metaphors") or [],
-            "imagery": (track_llm or {}).get("imagery") or {},
+            "available": bool(track_sem),
+            "summary": (track_sem or {}).get("summary") or "",
+            "metaphors": (track_sem or {}).get("metaphors") or [],
+            "imagery": (track_sem or {}).get("imagery") or {},
         },
     }
 
@@ -823,10 +822,15 @@ def api_barcode(playlist_id: str | None = None):
         lines = [l.strip() for l in text.split("\n") if l.strip()]
         if not lines:
             continue
+        sem = db.get_track_llm(t["id"])
+        if sem and sem.get("line_valences"):
+            values = [semantic_module.valence_for_line(sem, i) for i in range(len(lines))]
+        else:
+            values = [round(line_valence(l), 3) for l in lines]
         out.append({
             "id": t["id"],
             "title": t["title"],
-            "values": [round(line_valence(l), 3) for l in lines],
+            "values": values,
         })
     result = {"tracks": out}
     _barcode_cache.clear()

@@ -601,7 +601,7 @@ def run_deterministic_analysis(playlist_pk: int) -> int:
     db.update_run_llm_status(run_id, {
         "ok": False,
         "status": "pending",
-        "message": "Semantic engine queued (Phase 2).",
+        "message": "Awaiting semantic engine map pass.",
         "tracks_enriched": 0,
     })
     return run_id

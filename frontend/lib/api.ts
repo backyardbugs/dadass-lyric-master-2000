@@ -382,7 +382,7 @@ export type Topic = {
   top_tracks: { title: string; artist: string; weight: number }[];
 };
 
-export async function getTopics(): Promise<{ topics: Topic[]; source?: "gemini" | "nmf" | "none" }> {
+export async function getTopics(): Promise<{ topics: Topic[]; source?: "semantic" | "gemini" | "nmf" | "none" }> {
   return fetchApi(withPlaylistId("/api/topics"));
 }
 

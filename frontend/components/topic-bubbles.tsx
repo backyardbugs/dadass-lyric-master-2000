@@ -15,7 +15,7 @@ export function TopicBubbles({ topics, source }: { topics: Topic[]; source?: str
   if (topics.length === 0)
     return <p className="text-zinc-500 text-sm">No themes yet — run Analyze on a dataset with a few tracks.</p>;
 
-  const isGemini = source === "gemini";
+  const isSemantic = source === "semantic" || source === "gemini";
 
   return (
     <div>

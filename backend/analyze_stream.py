@@ -12,6 +12,7 @@ from typing import AsyncIterator
 from backend.cleaner import clean_lyrics
 from backend.fetch import extract_spotify_ref, fetch_source
 from backend.metrics import run_deterministic_analysis
+from backend import semantic_engine as semantic_module
 from backend import db
 
 
@@ -128,23 +129,33 @@ async def analyze_dataset_stream(
         run_id = await asyncio.to_thread(run_deterministic_analysis, playlist_pk)
 
         yield _sse({
-            "status": "Metrics complete. Preparing semantic engine…",
-            "progress": 75,
+            "status": "Metrics complete. Starting semantic engine…",
+            "progress": 55,
             "phase": "metrics",
             "run_id": run_id,
         })
 
-        if gemini_api_key:
-            yield _sse({
-                "status": "BYOK key received — semantic engine will use it in Phase 2.",
-                "progress": 80,
-                "phase": "semantic",
-            })
+        dataset_name = source_name or "Lyrics dataset"
+        tracks = await asyncio.to_thread(db.get_tracks, playlist_pk)
+
+        if semantic_module.is_enabled(gemini_api_key):
+            async for event in semantic_module.run_semantic_engine_stream(
+                tracks=tracks,
+                dataset_name=dataset_name,
+                run_id=run_id,
+                playlist_pk=playlist_pk,
+                api_key=gemini_api_key,
+            ):
+                hb = maybe_heartbeat()
+                if hb:
+                    yield hb
+                yield _sse(event)
         else:
             yield _sse({
-                "status": "Semantic engine queued (Map-Reduce arrives in Phase 2)…",
-                "progress": 80,
+                "status": "Semantic engine skipped (set GEMINI_API_KEY or pass BYOK).",
+                "progress": 85,
                 "phase": "semantic",
+                "skipped": True,
             })
 
         yield _sse({
