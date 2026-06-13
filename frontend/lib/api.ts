@@ -153,18 +153,26 @@ export async function runAnalyze(playlistId?: string | null): Promise<{
   const id = playlistId ?? getActivePlaylistId();
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), ANALYZE_TIMEOUT_MS);
+  const payload = JSON.stringify({ playlist_id: id ?? null });
   try {
     const res = await fetch(`${API_BASE}/api/analyze`, {
       method: "POST",
       credentials: "include",
-      headers: authHeaders(),
-      body: JSON.stringify({ playlist_id: id }),
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: payload,
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(typeof err.detail === "string" ? err.detail : JSON.stringify(err));
+      const detail = err.detail;
+      if (typeof detail === "string") {
+        throw new Error(detail);
+      }
+      if (Array.isArray(detail) && detail[0]?.msg) {
+        throw new Error(detail.map((d: { msg?: string }) => d.msg).join("; "));
+      }
+      throw new Error(JSON.stringify(err));
     }
     return res.json();
   } catch (e) {

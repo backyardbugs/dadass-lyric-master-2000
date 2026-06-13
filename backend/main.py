@@ -331,9 +331,10 @@ def _run_gemini_pass(run_id: int, playlist_pk: int, dataset_name: str) -> None:
 
 
 @app.post("/api/analyze", response_model=AnalyzeResponse)
-def api_analyze(body: AnalyzeRequest, background_tasks: BackgroundTasks):
+def api_analyze(background_tasks: BackgroundTasks, body: AnalyzeRequest | None = None):
     """Run word frequency, sentiment, POS, topic modeling on a specific dataset."""
-    playlist_pk = _resolve_playlist_pk(body.playlist_id)
+    req = body or AnalyzeRequest()
+    playlist_pk = _resolve_playlist_pk(req.playlist_id)
     if playlist_pk is None:
         raise HTTPException(status_code=400, detail="No playlist data. Run fetch first.")
     tracks = db.get_tracks(playlist_pk)
