@@ -155,6 +155,30 @@ def get_latest_playlist_id() -> int | None:
         conn.close()
 
 
+def get_playlist_pk_by_spotify_id(spotify_id: str) -> int | None:
+    """Resolve Spotify source id (playlist/album/artist) to playlist table pk."""
+    if not spotify_id or not spotify_id.strip():
+        return None
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT id FROM playlist WHERE playlist_id = ?",
+            (spotify_id.strip(),),
+        ).fetchone()
+        return row[0] if row else None
+    finally:
+        conn.close()
+
+
+def resolve_playlist_pk(spotify_id: str | None = None) -> int | None:
+    """Use explicit Spotify id when provided; otherwise fall back to latest fetch."""
+    if spotify_id and spotify_id.strip():
+        pk = get_playlist_pk_by_spotify_id(spotify_id.strip())
+        if pk is not None:
+            return pk
+    return get_latest_playlist_id()
+
+
 def get_tracks(playlist_pk: int | None = None) -> list[dict]:
     """Get tracks for a playlist (or latest playlist if playlist_pk is None)."""
     conn = get_connection()

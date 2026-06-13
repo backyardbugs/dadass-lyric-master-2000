@@ -497,10 +497,6 @@ def _dangling_clause(prev_line: str | None) -> bool:
     # A modal/aux/"to" with no verb after it means its verb starts the next line.
     last_modal = max((i for i, w in enumerate(toks) if w in _MODALS), default=-1)
     if last_modal >= 0:
-        try:
-            nltk.data.find("taggers/averaged_perceptron_tagger_eng")
-        except LookupError:
-            nltk.download("averaged_perceptron_tagger_eng", quiet=True)
         from nltk import pos_tag
 
         tagged = pos_tag(toks[last_modal + 1:])
@@ -573,10 +569,6 @@ def line_valence(line: str) -> float:
 # ---------- Corpus-level craft analysis ----------
 
 def _stopwords() -> set[str]:
-    try:
-        nltk.data.find("corpora/stopwords")
-    except LookupError:
-        nltk.download("stopwords", quiet=True)
     from nltk.corpus import stopwords
 
     return set(stopwords.words("english"))
@@ -917,10 +909,6 @@ def top_n_by_pos(
     lang: str = "english",
 ) -> dict[str, list[tuple[str, int]]]:
     """Return {"noun": [(w, c), ...], "verb": [...], "adjective": [...]}."""
-    try:
-        nltk.data.find("taggers/averaged_perceptron_tagger_eng")
-    except LookupError:
-        nltk.download("averaged_perceptron_tagger_eng", quiet=True)
     from nltk import pos_tag
 
     stop = _stopwords() | VOCALIZATIONS

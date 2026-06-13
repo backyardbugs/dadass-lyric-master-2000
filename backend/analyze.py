@@ -6,25 +6,6 @@ Uses NLTK. Callable with list of track dicts (id, lyrics or cleaned_lyrics).
 from collections import Counter
 from pathlib import Path
 
-import nltk
-
-try:
-    nltk.data.find("corpora/stopwords")
-except LookupError:
-    nltk.download("stopwords", quiet=True)
-try:
-    nltk.data.find("tokenizers/punkt")
-except LookupError:
-    nltk.download("punkt", quiet=True)
-try:
-    nltk.data.find("tokenizers/punkt_tab")
-except LookupError:
-    nltk.download("punkt_tab", quiet=True)
-try:
-    nltk.data.find("taggers/averaged_perceptron_tagger_eng")
-except LookupError:
-    nltk.download("averaged_perceptron_tagger_eng", quiet=True)
-
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
 

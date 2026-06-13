@@ -60,6 +60,9 @@ export default function ExplorePage() {
   const [contexts, setContexts] = useState<{ line: string; artist: string; title: string }[]>([]);
   const [contextLoading, setContextLoading] = useState(false);
   const [geminiPending, setGeminiPending] = useState(false);
+  const [geminiPollError, setGeminiPollError] = useState<string | null>(null);
+
+  const GEMINI_POLL_TIMEOUT_MS = 3 * 60 * 1000;
 
   const loadExploreData = async () => {
     const [wordsRes, heatRes, statsRes, topicsRes, craftRes, trendsRes, tracksRes, wordStatsRes, barcodeRes] =
@@ -102,11 +105,20 @@ export default function ExplorePage() {
 
   useEffect(() => {
     if (!geminiPending) return;
+    const startedAt = Date.now();
     const id = setInterval(async () => {
+      if (Date.now() - startedAt > GEMINI_POLL_TIMEOUT_MS) {
+        setGeminiPending(false);
+        setGeminiPollError(
+          "Gemini craft pass is taking longer than expected. Refresh the page to check again, or re-run Analyze."
+        );
+        return;
+      }
       try {
         const st = await getStatus();
         if (st.gemini_status?.status === "running") return;
         setGeminiPending(false);
+        setGeminiPollError(null);
         await loadExploreData();
       } catch {
         /* ignore */
@@ -167,6 +179,11 @@ export default function ExplorePage() {
             {geminiPending && (
               <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
                 Gemini craft pass still running… themes and track details will update automatically (usually under a minute).
+              </div>
+            )}
+            {geminiPollError && (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+                {geminiPollError}
               </div>
             )}
             <div className="grid lg:grid-cols-5 gap-6">

@@ -1,13 +1,53 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://dadass-lyric-master-2000-1.onrender.com";
 
+const ACTIVE_PLAYLIST_KEY = "active_playlist_id";
+
 let spotifyToken: string | null = null;
+let activePlaylistId: string | null = null;
 if (typeof window !== "undefined") {
   try {
     const stored = sessionStorage.getItem("spotify_token");
     if (stored) spotifyToken = stored;
+    const playlist = sessionStorage.getItem(ACTIVE_PLAYLIST_KEY);
+    if (playlist) activePlaylistId = playlist;
   } catch {
     /* ignore */
   }
+}
+
+export function setActivePlaylistId(id: string | null) {
+  activePlaylistId = id;
+  try {
+    if (typeof window !== "undefined") {
+      if (id) sessionStorage.setItem(ACTIVE_PLAYLIST_KEY, id);
+      else sessionStorage.removeItem(ACTIVE_PLAYLIST_KEY);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getActivePlaylistId(): string | null {
+  syncActivePlaylistFromStorage();
+  return activePlaylistId;
+}
+
+function syncActivePlaylistFromStorage() {
+  if (typeof window === "undefined") return;
+  if (activePlaylistId) return;
+  try {
+    const stored = sessionStorage.getItem(ACTIVE_PLAYLIST_KEY);
+    if (stored) activePlaylistId = stored;
+  } catch {
+    /* ignore */
+  }
+}
+
+function withPlaylistId(path: string): string {
+  syncActivePlaylistFromStorage();
+  if (!activePlaylistId) return path;
+  const sep = path.includes("?") ? "&" : "?";
+  return `${path}${sep}playlist_id=${encodeURIComponent(activePlaylistId)}`;
 }
 
 export function setSpotifyToken(token: string | null) {
@@ -91,7 +131,7 @@ export async function getAuthStatus(): Promise<{ spotify: boolean }> {
 }
 
 export async function getStatus(): Promise<Status> {
-  return fetchApi<Status>("/api/status");
+  return fetchApi<Status>(withPlaylistId("/api/status"));
 }
 
 export async function fetchPlaylist(playlistUrl: string): Promise<{ ok: boolean; message: string; track_count: number; playlist_id?: string }> {
@@ -103,13 +143,14 @@ export async function fetchPlaylist(playlistUrl: string): Promise<{ ok: boolean;
 
 const ANALYZE_TIMEOUT_MS = 120000;
 
-export async function runAnalyze(): Promise<{
+export async function runAnalyze(playlistId?: string | null): Promise<{
   ok: boolean;
   message: string;
   top_words: { word: string; count: number }[];
   run_id: number;
   gemini?: { ok?: boolean; status?: string; message?: string; tracks_enriched?: number } | null;
 }> {
+  const id = playlistId ?? getActivePlaylistId();
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), ANALYZE_TIMEOUT_MS);
   try {
@@ -117,6 +158,7 @@ export async function runAnalyze(): Promise<{
       method: "POST",
       credentials: "include",
       headers: authHeaders(),
+      body: JSON.stringify({ playlist_id: id }),
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
@@ -140,7 +182,7 @@ export async function runAnalyze(): Promise<{
 
 export async function getTopWords(pos?: string, limit = 100): Promise<{ top_words: { word: string; count: number }[]; run_id: number | null }> {
   const q = pos ? `?pos=${pos}&limit=${limit}` : `?limit=${limit}`;
-  return fetchApi(`/api/top-words${q}`);
+  return fetchApi(withPlaylistId(`/api/top-words${q}`));
 }
 
 export type HeatmapTrack = {
@@ -154,7 +196,7 @@ export type HeatmapTrack = {
 };
 
 export async function getSentimentHeatmap(): Promise<{ tracks: HeatmapTrack[] }> {
-  return fetchApi("/api/sentiment/heatmap");
+  return fetchApi(withPlaylistId("/api/sentiment/heatmap"));
 }
 
 export type SpeechAct = {
@@ -205,7 +247,7 @@ export type Craft = {
 };
 
 export async function getCraft(): Promise<Craft> {
-  return fetchApi("/api/craft");
+  return fetchApi(withPlaylistId("/api/craft"));
 }
 
 export type TrackSummary = {
@@ -228,7 +270,7 @@ export type TrackSummary = {
 };
 
 export async function getTracks(): Promise<{ tracks: TrackSummary[] }> {
-  return fetchApi("/api/tracks");
+  return fetchApi(withPlaylistId("/api/tracks"));
 }
 
 export type TrackLine = {
@@ -290,19 +332,19 @@ export type TrackDetail = {
 };
 
 export async function getTrack(id: number): Promise<TrackDetail> {
-  return fetchApi(`/api/track/${id}`);
+  return fetchApi(withPlaylistId(`/api/track/${id}`));
 }
 
 export type WordStat = { count: number; songs: number; ratio: number; conc?: number };
 
 export async function getWordStats(): Promise<{ words: Record<string, WordStat> }> {
-  return fetchApi("/api/word-stats");
+  return fetchApi(withPlaylistId("/api/word-stats"));
 }
 
 export type BarcodeTrack = { id: number; title: string; values: number[] };
 
 export async function getBarcode(): Promise<{ tracks: BarcodeTrack[] }> {
-  return fetchApi("/api/barcode");
+  return fetchApi(withPlaylistId("/api/barcode"));
 }
 
 export type TrendYear = {
@@ -316,11 +358,11 @@ export type TrendYear = {
 };
 
 export async function getTrends(): Promise<{ years: TrendYear[] }> {
-  return fetchApi("/api/trends");
+  return fetchApi(withPlaylistId("/api/trends"));
 }
 
 export async function getWordContext(word: string): Promise<{ word: string; contexts: { line: string; artist: string; title: string }[] }> {
-  return fetchApi(`/api/word-context?word=${encodeURIComponent(word)}`);
+  return fetchApi(withPlaylistId(`/api/word-context?word=${encodeURIComponent(word)}`));
 }
 
 export type Topic = {
@@ -333,7 +375,7 @@ export type Topic = {
 };
 
 export async function getTopics(): Promise<{ topics: Topic[]; source?: "gemini" | "nmf" | "none" }> {
-  return fetchApi("/api/topics");
+  return fetchApi(withPlaylistId("/api/topics"));
 }
 
 export type Superlative = { title: string; artist: string; value: number } | null;
@@ -363,7 +405,7 @@ export type Stats = {
 };
 
 export async function getStats(): Promise<Stats> {
-  return fetchApi("/api/stats");
+  return fetchApi(withPlaylistId("/api/stats"));
 }
 
 export async function getSuggestRhymes(word: string): Promise<{ word: string; rhymes: string[] }> {
@@ -371,7 +413,7 @@ export async function getSuggestRhymes(word: string): Promise<{ word: string; rh
 }
 
 export async function getSuggestThematic(word: string): Promise<{ word: string; thematic: string[] }> {
-  return fetchApi(`/api/suggest/thematic?word=${encodeURIComponent(word)}`);
+  return fetchApi(withPlaylistId(`/api/suggest/thematic?word=${encodeURIComponent(word)}`));
 }
 
 export async function getClicheWords(): Promise<{ words: string[] }> {
@@ -379,5 +421,5 @@ export async function getClicheWords(): Promise<{ words: string[] }> {
 }
 
 export async function checkCliche(text: string): Promise<{ cliche_words: string[] }> {
-  return fetchApi("/api/cliche-check", { method: "POST", body: JSON.stringify({ text }) });
+  return fetchApi(withPlaylistId("/api/cliche-check"), { method: "POST", body: JSON.stringify({ text }) });
 }

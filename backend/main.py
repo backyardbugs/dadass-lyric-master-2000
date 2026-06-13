@@ -46,6 +46,7 @@ from backend.nlp import (
 )
 from backend import db
 from backend import llm as llm_module
+from backend.nltk_init import ensure_nltk_data
 
 app = FastAPI(title="Dad Ass Lyric Analyzer 3000 API", version="0.1.0")
 
@@ -87,7 +88,12 @@ def _get_spotify_token_from_request(request: Request) -> str | None:
 
 @app.on_event("startup")
 def startup():
+    ensure_nltk_data()
     db.init_db()
+
+
+def _resolve_playlist_pk(spotify_id: str | None) -> int | None:
+    return db.resolve_playlist_pk(spotify_id)
 
 
 class FetchRequest(BaseModel):
@@ -278,6 +284,10 @@ def api_fetch(body: FetchRequest, request: Request):
     )
 
 
+class AnalyzeRequest(BaseModel):
+    playlist_id: str | None = None
+
+
 class AnalyzeResponse(BaseModel):
     ok: bool
     message: str
@@ -321,9 +331,9 @@ def _run_gemini_pass(run_id: int, playlist_pk: int, dataset_name: str) -> None:
 
 
 @app.post("/api/analyze", response_model=AnalyzeResponse)
-def api_analyze(background_tasks: BackgroundTasks):
-    """Run word frequency, sentiment, POS, topic modeling on latest playlist and store results."""
-    playlist_pk = db.get_latest_playlist_id()
+def api_analyze(body: AnalyzeRequest, background_tasks: BackgroundTasks):
+    """Run word frequency, sentiment, POS, topic modeling on a specific dataset."""
+    playlist_pk = _resolve_playlist_pk(body.playlist_id)
     if playlist_pk is None:
         raise HTTPException(status_code=400, detail="No playlist data. Run fetch first.")
     tracks = db.get_tracks(playlist_pk)
@@ -415,9 +425,10 @@ class StatusResponse(BaseModel):
 
 
 @app.get("/api/status", response_model=StatusResponse)
-def api_status():
+def api_status(playlist_id: str | None = None):
     """Return whether we have playlist data and last analysis time."""
-    info = db.get_playlist_info()
+    playlist_pk = _resolve_playlist_pk(playlist_id)
+    info = db.get_playlist_info(playlist_pk)
     if not info:
         return StatusResponse(has_data=False, track_count=0, last_analyzed=None)
     run_id = db.get_latest_run_id(info["id"])
@@ -444,9 +455,10 @@ def api_status():
 
 
 @app.get("/api/top-words")
-def api_top_words(pos: str | None = None, limit: int = 100):
+def api_top_words(pos: str | None = None, limit: int = 100, playlist_id: str | None = None):
     """Return top words from latest analysis run. pos: null (overall), noun, verb, adj."""
-    run_id = db.get_latest_run_id()
+    playlist_pk = _resolve_playlist_pk(playlist_id)
+    run_id = db.get_latest_run_id(playlist_pk)
     if run_id is None:
         return {"top_words": [], "run_id": None}
     conn = db.get_connection()
@@ -468,10 +480,10 @@ def api_top_words(pos: str | None = None, limit: int = 100):
 
 
 @app.get("/api/sentiment/heatmap")
-def api_sentiment_heatmap():
+def api_sentiment_heatmap(playlist_id: str | None = None):
     """Per-track tone metrics in track order: valence (-1..1, dark to bright),
     intensity (0..1, how emotionally charged), volatility (line-to-line mood swing)."""
-    playlist_pk = db.get_latest_playlist_id()
+    playlist_pk = _resolve_playlist_pk(playlist_id)
     if playlist_pk is None:
         return {"tracks": []}
     tracks = db.get_tracks(playlist_pk)
@@ -491,12 +503,13 @@ def api_sentiment_heatmap():
 
 
 @app.get("/api/word-context")
-def api_word_context(word: str):
+def api_word_context(word: str, playlist_id: str | None = None):
     """Return lines where the word appears, with artist/title. For word cloud click-through."""
     if not word or not word.strip():
         raise HTTPException(status_code=400, detail="Missing word parameter")
     word = word.strip().lower()
-    run_id = db.get_latest_run_id()
+    playlist_pk = _resolve_playlist_pk(playlist_id)
+    run_id = db.get_latest_run_id(playlist_pk)
     if run_id is None:
         return {"word": word, "contexts": []}
     conn = db.get_connection()
@@ -513,14 +526,14 @@ def api_word_context(word: str):
 
 
 @app.get("/api/topics")
-def api_topics():
+def api_topics(playlist_id: str | None = None):
     """Return theme labels with top tracks. Uses Gemini themes when cached for this run."""
-    run_id = db.get_latest_run_id()
+    playlist_pk = _resolve_playlist_pk(playlist_id)
+    run_id = db.get_latest_run_id(playlist_pk)
     if run_id is None:
         return {"topics": [], "source": "none"}
     llm_themes = db.get_run_llm_themes(run_id)
     if llm_themes:
-        playlist_pk = db.get_latest_playlist_id()
         tracks = db.get_tracks(playlist_pk) if playlist_pk else []
         by_id = {t["id"]: t for t in tracks}
         topics = []
@@ -580,9 +593,9 @@ _WORD_RE = re.compile(r"[a-z][a-z']*")
 
 
 @app.get("/api/stats")
-def api_stats():
+def api_stats(playlist_id: str | None = None):
     """Corpus stats and standout tracks for the latest dataset (for the Explore page)."""
-    playlist_pk = db.get_latest_playlist_id()
+    playlist_pk = _resolve_playlist_pk(playlist_id)
     if playlist_pk is None:
         return {"has_data": False}
     tracks = db.get_tracks(playlist_pk)
@@ -661,11 +674,11 @@ _SOUND_AVG_KEYS = [
 
 
 @app.get("/api/craft")
-def api_craft():
+def api_craft(playlist_id: str | None = None):
     """Craft analysis of the corpus: signature words, hooks, rhyme pairs,
     point of view, speech acts, sound/diction profile, verse vs chorus contrast."""
-    run_id = db.get_latest_run_id()
-    playlist_pk = db.get_latest_playlist_id()
+    playlist_pk = _resolve_playlist_pk(playlist_id)
+    run_id = db.get_latest_run_id(playlist_pk)
     if playlist_pk is None:
         return {"has_data": False}
     cache_key = run_id or -1
@@ -711,9 +724,9 @@ def api_craft():
 
 
 @app.get("/api/tracks")
-def api_tracks():
+def api_tracks(playlist_id: str | None = None):
     """All tracks in the latest dataset with per-track metrics and structure summary."""
-    playlist_pk = db.get_latest_playlist_id()
+    playlist_pk = _resolve_playlist_pk(playlist_id)
     if playlist_pk is None:
         return {"tracks": []}
     tracks = db.get_tracks(playlist_pk)
@@ -744,10 +757,10 @@ def api_tracks():
 
 
 @app.get("/api/track/{track_id}")
-def api_track(track_id: int):
+def api_track(track_id: int, playlist_id: str | None = None):
     """One track: metrics plus lyrics with per-line tone, rhyme, speech act.
     Gemini annotations (sections, metaphors, imagery) come from cache only — set during Analyze."""
-    playlist_pk = db.get_latest_playlist_id()
+    playlist_pk = _resolve_playlist_pk(playlist_id)
     if playlist_pk is None:
         raise HTTPException(status_code=404, detail="No data.")
     tracks = db.get_tracks(playlist_pk)
@@ -836,14 +849,14 @@ _word_stats_cache: dict[int, dict] = {}
 
 
 @app.get("/api/word-stats")
-def api_word_stats():
+def api_word_stats(playlist_id: str | None = None):
     """Corpus stats for every word (for hover tooltips in the lyrics viewer):
     count, number of songs it appears in, and usage ratio vs everyday English."""
     import math
 
     from wordfreq import zipf_frequency
 
-    playlist_pk = db.get_latest_playlist_id()
+    playlist_pk = _resolve_playlist_pk(playlist_id)
     if playlist_pk is None:
         return {"words": {}}
     if playlist_pk in _word_stats_cache:
@@ -886,9 +899,9 @@ _barcode_cache: dict[int, dict] = {}
 
 
 @app.get("/api/barcode")
-def api_barcode():
+def api_barcode(playlist_id: str | None = None):
     """Per-track, per-line tone values for the album barcode visualization."""
-    playlist_pk = db.get_latest_playlist_id()
+    playlist_pk = _resolve_playlist_pk(playlist_id)
     if playlist_pk is None:
         return {"tracks": []}
     if playlist_pk in _barcode_cache:
@@ -912,10 +925,10 @@ def api_barcode():
 
 
 @app.get("/api/trends")
-def api_trends():
+def api_trends(playlist_id: str | None = None):
     """Per-year averages (valence, lexical diversity, words per track) for
     datasets with release years — e.g. artist discographies."""
-    playlist_pk = db.get_latest_playlist_id()
+    playlist_pk = _resolve_playlist_pk(playlist_id)
     if playlist_pk is None:
         return {"years": []}
     tracks = db.get_tracks(playlist_pk)
@@ -959,12 +972,13 @@ def api_suggest_rhymes(word: str, limit: int = 15):
 
 
 @app.get("/api/suggest/thematic")
-def api_suggest_thematic(word: str, limit: int = 20):
+def api_suggest_thematic(word: str, limit: int = 20, playlist_id: str | None = None):
     """Return thematically related words from corpus (top words that co-occur in same topic or top overall)."""
     if not word or not word.strip():
         raise HTTPException(status_code=400, detail="Missing word parameter")
     word = word.strip().lower()
-    run_id = db.get_latest_run_id()
+    playlist_pk = _resolve_playlist_pk(playlist_id)
+    run_id = db.get_latest_run_id(playlist_pk)
     if run_id is None:
         return {"word": word, "thematic": []}
     conn = db.get_connection()
@@ -985,12 +999,13 @@ class ClicheCheckRequest(BaseModel):
 
 
 @app.get("/api/cliche-words")
-def api_cliche_words():
+def api_cliche_words(playlist_id: str | None = None):
     """Return set of words that appear in >50% of songs (for client-side highlighting)."""
-    run_id = db.get_latest_run_id()
+    playlist_pk = _resolve_playlist_pk(playlist_id)
+    run_id = db.get_latest_run_id(playlist_pk)
     if run_id is None:
         return {"words": []}
-    info = db.get_playlist_info()
+    info = db.get_playlist_info(playlist_pk)
     if not info or info["track_count"] == 0:
         return {"words": []}
     n_tracks = info["track_count"]
@@ -1009,10 +1024,10 @@ def api_cliche_words():
 
 
 @app.post("/api/cliche-check")
-def api_cliche_check(body: ClicheCheckRequest):
+def api_cliche_check(body: ClicheCheckRequest, playlist_id: str | None = None):
     """Tokenize text and return which words are in the >50% cliche set."""
     from nltk.tokenize import word_tokenize
-    cliche_res = api_cliche_words()
+    cliche_res = api_cliche_words(playlist_id=playlist_id)
     cliche_set = set(cliche_res.get("words", []))
     text = (body.text or "").lower()
     tokens = [w for w in word_tokenize(text) if w.isalpha()]

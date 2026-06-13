@@ -9,11 +9,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Bake NLTK data into the image so analysis works on first request
-RUN python -c "import nltk; [nltk.download(p, quiet=True) for p in ['punkt', 'punkt_tab', 'stopwords', 'averaged_perceptron_tagger_eng']]"
-
 COPY backend/ ./backend/
 RUN mkdir -p /app/data
+
+# Bake NLTK data into the image so analysis works on first request
+RUN python -c "from backend.nltk_init import ensure_nltk_data; ensure_nltk_data()"
 
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1

@@ -85,30 +85,76 @@ def _chunk_tracks(tracks: list[dict], dataset_name: str) -> list[list[dict]]:
     return chunks
 
 
+def _repair_truncated_json(text: str) -> str | None:
+    """Best-effort repair when Gemini truncates mid-JSON (max output tokens)."""
+    start = text.find("{")
+    if start < 0:
+        return None
+    body = text[start:].rstrip()
+    # Drop trailing incomplete key/string/value fragments
+    body = re.sub(r',\s*"[^"\n\\]*$', "", body)
+    body = re.sub(r':\s*"[^"\n\\]*$', ': ""', body)
+    body = re.sub(r',\s*$', "", body)
+
+    stack: list[str] = []
+    in_string = False
+    escape = False
+    for ch in body:
+        if escape:
+            escape = False
+            continue
+        if ch == "\\" and in_string:
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            stack.append("}")
+        elif ch == "[":
+            stack.append("]")
+        elif ch in "}]":
+            if stack and stack[-1] == ch:
+                stack.pop()
+
+    if in_string:
+        body += '"'
+    if stack:
+        body += "".join(reversed(stack))
+    return body
+
+
 def _extract_json(text: str) -> dict | None:
     text = (text or "").strip()
     if not text:
         return None
-    try:
-        data = json.loads(text)
-        return data if isinstance(data, dict) else None
-    except json.JSONDecodeError:
-        pass
+
+    candidates: list[str] = [text]
     m = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
     if m:
-        try:
-            data = json.loads(m.group(1).strip())
-            return data if isinstance(data, dict) else None
-        except json.JSONDecodeError:
-            pass
+        candidates.append(m.group(1).strip())
     start = text.find("{")
     end = text.rfind("}")
     if start >= 0 and end > start:
+        candidates.append(text[start : end + 1])
+    if start >= 0:
+        repaired = _repair_truncated_json(text)
+        if repaired:
+            candidates.append(repaired)
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
         try:
-            data = json.loads(text[start : end + 1])
-            return data if isinstance(data, dict) else None
+            data = json.loads(candidate)
+            if isinstance(data, dict):
+                return data
         except json.JSONDecodeError:
-            pass
+            continue
     return None
 
 
@@ -266,13 +312,27 @@ Corpus:
 """
 
 
-def _call_chunk(tracks: list[dict], dataset_name: str, chunk_index: int, n_chunks: int) -> dict | None:
+def _call_chunk(
+    tracks: list[dict],
+    dataset_name: str,
+    chunk_index: int,
+    n_chunks: int,
+    *,
+    allow_retry: bool = True,
+) -> dict | None:
     md = build_corpus_markdown(tracks, dataset_name)
     if not md:
         return None
     note = f" (chunk {chunk_index + 1} of {n_chunks})" if n_chunks > 1 else ""
-    raw = _call_gemini(_prompt_for_chunk(md, chunk_note=note))
-    return _extract_json(raw or "")
+    prompt = _prompt_for_chunk(md, chunk_note=note)
+    raw = _call_gemini(prompt)
+    parsed = _extract_json(raw or "")
+    if parsed or not allow_retry:
+        return parsed
+    # Truncated or malformed JSON — one retry with a shorter, stricter prompt
+    retry_prompt = prompt + "\n\nIMPORTANT: Prior response was truncated. Return valid JSON only. Omit optional fields if needed; never cut off mid-string."
+    raw_retry = _call_gemini(retry_prompt, temperature=0.1)
+    return _extract_json(raw_retry or "")
 
 
 def analyze_corpus(tracks: list[dict], dataset_name: str) -> dict:

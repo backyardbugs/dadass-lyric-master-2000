@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { getStatus, fetchPlaylist, runAnalyze, getAuthStatus, getSpotifyLoginUrl, exchangeSpotifyCode, setSpotifyToken } from "@/lib/api";
+import { getStatus, fetchPlaylist, runAnalyze, getAuthStatus, getSpotifyLoginUrl, exchangeSpotifyCode, setSpotifyToken, setActivePlaylistId, getActivePlaylistId } from "@/lib/api";
 
 export default function DashboardPage() {
   const [playlistUrl, setPlaylistUrl] = useState("");
@@ -106,7 +106,8 @@ export default function DashboardPage() {
     setLoading("fetch");
     setMessage(null);
     try {
-      await fetchPlaylist(playlistUrl.trim());
+      const res = await fetchPlaylist(playlistUrl.trim());
+      if (res.playlist_id) setActivePlaylistId(res.playlist_id);
       setMessage({ type: "success", text: "Lyrics fetched successfully." });
       await loadStatus();
     } catch (e) {
@@ -125,7 +126,7 @@ export default function DashboardPage() {
     setLoading("analyze");
     setMessage(null);
     try {
-      const res = await runAnalyze();
+      const res = await runAnalyze(getActivePlaylistId());
       setMessage({ type: "success", text: res.message || "Analysis complete." });
       await loadStatus();
       if (res.gemini?.status === "running") {
